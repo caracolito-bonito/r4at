@@ -1,6 +1,8 @@
+use std::collections::HashMap;
 use std::fmt::Display;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread;
@@ -26,9 +28,20 @@ impl<T: Display> Display for Sensitive<T> {
 }
 
 enum Message {
-    ClientConnected,
-    ClientDisconnected,
-    NewMessage(Vec<u8>),
+    ClientConnected {
+        author: Arc<TcpStream>,
+    },
+    ClientDisconnected {
+        author: Arc<TcpStream>,
+    },
+    NewMessage {
+        author: Arc<TcpStream>,
+        bytes: Vec<u8>,
+    },
+}
+
+struct Client {
+    conn: Arc<TcpStream>,
 }
 
 fn main() -> Result<()> {
@@ -48,7 +61,7 @@ fn main() -> Result<()> {
         match stream {
             Ok(stream) => {
                 let message_sender = message_sender.clone();
-                thread::spawn(|| client(stream, message_sender));
+                thread::spawn(|| client(Arc::new(stream), message_sender));
             }
             Err(e) => {
                 eprintln!("ERROR: could not accept connection: {e}")
@@ -59,23 +72,75 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn server(_messages: Receiver<Message>) -> Result<()> {
-    todo!()
+fn server(messages: Receiver<Message>) -> Result<()> {
+    let mut clients = HashMap::new();
+
+    loop {
+        let msg = messages.recv().expect("The server receiver is not hung up");
+
+        match msg {
+            Message::ClientConnected { author } => {
+                let addr = author
+                    .peer_addr()
+                    .expect("TODO: cache the peer address of the connection");
+                clients.insert(
+                    addr.clone(),
+                    Client {
+                        conn: author.clone(),
+                    },
+                );
+            }
+            Message::ClientDisconnected { author } => {
+                let addr = author
+                    .peer_addr()
+                    .expect("TODO: cache the peer address of the connection");
+
+                clients.remove(&addr);
+            }
+            Message::NewMessage { author, bytes } => {
+                let author_addr = author
+                    .peer_addr()
+                    .expect("TODO: cache the peer address of the connection");
+
+                for (addr, client) in clients.iter() {
+                    if *addr != author_addr {
+                        let _ = client.conn.as_ref().write(&bytes);
+                    }
+                }
+            }
+        }
+    }
 }
 
-fn client(mut stream: TcpStream, messages: Sender<Message>) -> Result<()> {
+fn client(stream: Arc<TcpStream>, messages: Sender<Message>) -> Result<()> {
     messages
-        .send(Message::ClientConnected)
+        .send(Message::ClientConnected {
+            author: stream.clone(),
+        })
         .map_err(|err| eprintln!("ERROR: Could not send message to the server thread: {err}"))?;
 
-    let mut buffer = Vec::with_capacity(64);
+    let mut buffer = [0u8; 64];
+
     loop {
-        let bytes_read = stream.read(&mut buffer).map_err(|err| {
+        let bytes_read = stream.as_ref().read(&mut buffer).map_err(|err| {
             eprintln!("ERROR: Could not read message from client {err}");
-            let _ = messages.send(Message::ClientDisconnected);
+            let _ = messages.send(Message::ClientDisconnected {
+                author: stream.clone(),
+            });
         })?;
+
+        if bytes_read == 0 {
+            let _ = messages.send(Message::ClientDisconnected {
+                author: stream.clone(),
+            });
+            return Ok(());
+        }
+
         messages
-            .send(Message::NewMessage(buffer[0..bytes_read].to_vec()))
+            .send(Message::NewMessage {
+                author: stream.clone(),
+                bytes: buffer[0..bytes_read].to_vec(),
+            })
             .map_err(|err| {
                 eprintln!("ERROR: Failed to send a message to the server thread: {err}");
             })?;
