@@ -34,10 +34,10 @@ enum Message {
         author: Arc<TcpStream>,
     },
     ClientDisconnected {
-        author: Arc<TcpStream>,
+        author_addr: SocketAddr,
     },
     NewMessage {
-        author: Arc<TcpStream>,
+        author_addr: SocketAddr,
         bytes: Vec<u8>,
     },
 }
@@ -128,21 +128,16 @@ fn server(messages: Receiver<Message>) -> Result<()> {
                     );
                 }
             }
-            Message::ClientDisconnected { author } => {
-                let addr = author
-                    .peer_addr()
-                    .expect("TODO: cache the peer address of the connection");
-
-                clients.remove(&addr);
+            Message::ClientDisconnected { author_addr } => {
+                clients.remove(&author_addr);
             }
-            Message::NewMessage { author, bytes } => {
-                let author_addr = author
-                    .peer_addr()
-                    .expect("TODO: cache the peer address of the connection");
-
-                for (addr, client) in clients.iter() {
-                    if *addr != author_addr {
-                        let _ = client.conn.as_ref().write(&bytes);
+            Message::NewMessage { author_addr, bytes } => {
+                if let Some(author) = clients.get(&author_addr) {
+                    let now = SystemTime::now();
+                    for (addr, client) in clients.iter() {
+                        if *addr != author_addr {
+                            let _ = client.conn.as_ref().write(&bytes);
+                        }
                     }
                 }
             }
@@ -151,6 +146,10 @@ fn server(messages: Receiver<Message>) -> Result<()> {
 }
 
 fn client(stream: Arc<TcpStream>, messages: Sender<Message>) -> Result<()> {
+    let author_addr = stream
+        .peer_addr()
+        .map_err(|err| eprintln!("Could not get peer address: {err}"))?;
+
     messages
         .send(Message::ClientConnected {
             author: stream.clone(),
@@ -162,23 +161,17 @@ fn client(stream: Arc<TcpStream>, messages: Sender<Message>) -> Result<()> {
     loop {
         let bytes_read = stream.as_ref().read(&mut buffer).map_err(|err| {
             eprintln!("ERROR: Could not read message from client {err}");
-            let _ = messages.send(Message::ClientDisconnected {
-                author: stream.clone(),
-            });
+            let _ = messages.send(Message::ClientDisconnected { author_addr });
         })?;
 
         if bytes_read == 0 {
-            let _ = messages.send(Message::ClientDisconnected {
-                author: stream.clone(),
-            });
+            let _ = messages.send(Message::ClientDisconnected { author_addr });
             return Ok(());
         }
+        let bytes = buffer[0..bytes_read].to_vec();
 
         messages
-            .send(Message::NewMessage {
-                author: stream.clone(),
-                bytes: buffer[0..bytes_read].to_vec(),
-            })
+            .send(Message::NewMessage { author_addr, bytes })
             .map_err(|err| {
                 eprintln!("ERROR: Failed to send a message to the server thread: {err}");
             })?;
