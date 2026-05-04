@@ -11,7 +11,7 @@ use std::time::{Duration, SystemTime};
 type Result<T> = std::result::Result<T, ()>;
 
 static SENSITIVE_MODE: AtomicBool = AtomicBool::new(false);
-const BAN_LIMIT: Duration = Duration::from_secs(1 * 60);
+const BAN_LIMIT: Duration = Duration::from_secs(10 * 60);
 const MESSAGE_RATE: Duration = Duration::from_secs(1);
 const STRIKE_LIMIT: u64 = 10;
 
@@ -141,13 +141,14 @@ fn server(messages: Receiver<Message>) -> Result<()> {
                         .expect("TODO: we shouldn't crash if the clock goes backwards");
 
                     println!(
-                        "Client {client} sent message",
-                        client = Sensitive(author_addr)
+                        "Client {client} trying to send message",
+                        client = author_addr
                     );
 
                     if diff >= MESSAGE_RATE {
                         if str::from_utf8(&bytes).is_ok() {
                             author.last_message = now;
+                            println!("Client {author_addr} sent message {bytes:?}");
                             for (addr, client) in clients.iter() {
                                 if *addr != author_addr {
                                     let _ = client.conn.as_ref().write(&bytes);
