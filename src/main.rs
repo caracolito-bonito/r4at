@@ -11,10 +11,11 @@ use std::time::{Duration, SystemTime};
 type Result<T> = std::result::Result<T, ()>;
 
 static SENSITIVE_MODE: AtomicBool = AtomicBool::new(false);
-const BAN_LIMIT: Duration = Duration::from_secs(10 * 60);
+const BAN_LIMIT: Duration = Duration::from_secs(1 * 60);
 const MESSAGE_RATE: Duration = Duration::from_secs(1);
 const STRIKE_LIMIT: u64 = 10;
 
+#[allow(dead_code)]
 fn set_sensitive_mode(enabled: bool) {
     SENSITIVE_MODE.store(enabled, Ordering::Relaxed);
 }
@@ -24,7 +25,7 @@ struct Sensitive<T>(T);
 impl<T: Display> Display for Sensitive<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if SENSITIVE_MODE.load(Ordering::Relaxed) {
-            writeln!(f, "[REDACTED]")
+            write!(f, "[REDACTED]")
         } else {
             self.0.fmt(f)
         }
@@ -52,10 +53,8 @@ struct Client {
 
 fn main() -> Result<()> {
     let addr = "127.0.0.1:6969";
-    set_sensitive_mode(true);
     let listener = TcpListener::bind(addr)
         .map_err(|err| eprintln!("ERROR: cound not bind {addr}: {}", Sensitive(err)))?;
-    set_sensitive_mode(false);
 
     println!("Listening to {}", Sensitive(addr));
 
@@ -140,15 +139,18 @@ fn server(messages: Receiver<Message>) -> Result<()> {
                     let diff = now
                         .duration_since(author.last_message)
                         .expect("TODO: we shouldn't crash if the clock goes backwards");
-                    set_sensitive_mode(true);
-                    println!("Client {client} sent message", client = author_addr);
-                    set_sensitive_mode(false);
+
+                    println!(
+                        "Client {client} sent message",
+                        client = Sensitive(author_addr)
+                    );
 
                     if diff >= MESSAGE_RATE {
-                        if let Ok(text) = str::from_utf8(&bytes) {
+                        if str::from_utf8(&bytes).is_ok() {
+                            author.last_message = now;
                             for (addr, client) in clients.iter() {
                                 if *addr != author_addr {
-                                    let _ = client.conn.as_ref().write(text.as_bytes());
+                                    let _ = client.conn.as_ref().write(&bytes);
                                 }
                             }
                         } else {
