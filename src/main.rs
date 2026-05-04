@@ -1,15 +1,17 @@
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread;
+use std::time::{Duration, SystemTime};
 
 type Result<T> = std::result::Result<T, ()>;
 
 static SENSITIVE_MODE: AtomicBool = AtomicBool::new(false);
+const BAN_LIMIT: Duration = Duration::from_secs(10 * 60);
 
 fn set_sensitive_mode(enabled: bool) {
     SENSITIVE_MODE.store(enabled, Ordering::Relaxed);
@@ -42,6 +44,8 @@ enum Message {
 
 struct Client {
     conn: Arc<TcpStream>,
+    last_message: SystemTime,
+    strike_count: u64,
 }
 
 fn main() -> Result<()> {
@@ -73,22 +77,56 @@ fn main() -> Result<()> {
 }
 
 fn server(messages: Receiver<Message>) -> Result<()> {
-    let mut clients = HashMap::new();
+    let mut clients = HashMap::<SocketAddr, Client>::new();
+    let mut banned_users = HashMap::<IpAddr, SystemTime>::new();
 
     loop {
         let msg = messages.recv().expect("The server receiver is not hung up");
 
         match msg {
             Message::ClientConnected { author } => {
-                let addr = author
+                let author_addr = author
                     .peer_addr()
                     .expect("TODO: cache the peer address of the connection");
-                clients.insert(
-                    addr.clone(),
-                    Client {
-                        conn: author.clone(),
-                    },
-                );
+
+                let banned_at = banned_users.remove(&author_addr.ip());
+                let now = SystemTime::now();
+
+                let still_banned = banned_at.and_then(|banned_at| {
+                    let diff = now
+                        .duration_since(banned_at)
+                        .expect("TODO: we shouldn't crash if the clock goes backwards");
+                    if diff >= BAN_LIMIT {
+                        None
+                    } else {
+                        Some(banned_at)
+                    }
+                });
+
+                if let Some(banned_at) = still_banned {
+                    banned_users.insert(author_addr.ip(), banned_at);
+
+                    let diff = now
+                        .duration_since(banned_at)
+                        .expect("TODO: we shouldn't crash if the clock goes backwards");
+
+                    let mut author = author.as_ref();
+                    let _ = writeln!(
+                        author,
+                        "You are banned! {secs}s left",
+                        secs = (BAN_LIMIT - diff).as_secs_f32()
+                    );
+                    let _ = author.shutdown(std::net::Shutdown::Both);
+                } else {
+                    clients.insert(
+                        author_addr.clone(),
+                        Client {
+                            conn: author.clone(),
+                            last_message: now,
+                            strike_count: 0,
+                        },
+                    );
+                }
             }
             Message::ClientDisconnected { author } => {
                 let addr = author
