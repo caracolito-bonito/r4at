@@ -12,6 +12,8 @@ type Result<T> = std::result::Result<T, ()>;
 
 static SENSITIVE_MODE: AtomicBool = AtomicBool::new(false);
 const BAN_LIMIT: Duration = Duration::from_secs(10 * 60);
+const MESSAGE_RATE: Duration = Duration::from_secs(1);
+const STRIKE_LIMIT: u64 = 10;
 
 fn set_sensitive_mode(enabled: bool) {
     SENSITIVE_MODE.store(enabled, Ordering::Relaxed);
@@ -132,11 +134,45 @@ fn server(messages: Receiver<Message>) -> Result<()> {
                 clients.remove(&author_addr);
             }
             Message::NewMessage { author_addr, bytes } => {
-                if let Some(author) = clients.get(&author_addr) {
+                if let Some(author) = clients.get_mut(&author_addr) {
                     let now = SystemTime::now();
-                    for (addr, client) in clients.iter() {
-                        if *addr != author_addr {
-                            let _ = client.conn.as_ref().write(&bytes);
+
+                    let diff = now
+                        .duration_since(author.last_message)
+                        .expect("TODO: we shouldn't crash if the clock goes backwards");
+                    set_sensitive_mode(true);
+                    println!("Client {client} sent message", client = author_addr);
+                    set_sensitive_mode(false);
+
+                    if diff >= MESSAGE_RATE {
+                        if let Ok(text) = str::from_utf8(&bytes) {
+                            for (addr, client) in clients.iter() {
+                                if *addr != author_addr {
+                                    let _ = client.conn.as_ref().write(text.as_bytes());
+                                }
+                            }
+                        } else {
+                            author.strike_count += 1;
+                            if author.strike_count >= STRIKE_LIMIT {
+                                banned_users.insert(author_addr.ip(), now);
+                                let _ = writeln!(
+                                    author.conn.as_ref(),
+                                    "You are banned! {secs}s left",
+                                    secs = (BAN_LIMIT - diff).as_secs_f32()
+                                );
+                                let _ = author.conn.shutdown(std::net::Shutdown::Both);
+                            }
+                        }
+                    } else {
+                        author.strike_count += 1;
+                        if author.strike_count >= STRIKE_LIMIT {
+                            banned_users.insert(author_addr.ip(), now);
+                            let _ = writeln!(
+                                author.conn.as_ref(),
+                                "You are banned! {secs}s left",
+                                secs = (BAN_LIMIT - diff).as_secs_f32()
+                            );
+                            let _ = author.conn.shutdown(std::net::Shutdown::Both);
                         }
                     }
                 }
