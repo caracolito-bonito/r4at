@@ -202,6 +202,11 @@ fn client(stream: Arc<TcpStream>, messages: Sender<Message>) -> Result<()> {
         .peer_addr()
         .map_err(|err| eprintln!("Could not get peer address: {err}"))?;
 
+    // TODO: auth check impl
+    // here we can do a check of input from the still unathorized user, if it's a valid token, we just send ClientConnected message
+    // if it's not a valid token we just straiht up closing connection
+    // So we dont have to introduce state on the server
+
     messages
         .send(Message::ClientConnected {
             author: stream.clone(),
