@@ -207,7 +207,13 @@ fn client(stream: Arc<TcpStream>, messages: Sender<Message>) -> Result<()> {
             let _ = messages.send(Message::ClientDisconnected { author_addr });
             return Ok(());
         }
-        let bytes = buffer[0..bytes_read].to_vec();
+        let mut bytes = Vec::new();
+
+        for b in &buffer[0..bytes_read].to_vec() {
+            if *b >= 32 {
+                bytes.push(*b);
+            }
+        }
 
         messages
             .send(Message::NewMessage { author_addr, bytes })
