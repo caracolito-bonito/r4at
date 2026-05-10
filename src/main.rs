@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::Display;
+use std::fmt::Write as FmtWrite;
 use std::io::{Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
@@ -52,6 +53,18 @@ struct Client {
 }
 
 fn main() -> Result<()> {
+    let mut token_raw = [0; 16];
+    let _ = getrandom::fill(&mut token_raw)
+        .map_err(|err| eprintln!("ERROR: Couldn't generate raw token: {err}"));
+
+    let mut token = String::new();
+
+    for b in token_raw.iter() {
+        let _ = write!(token, "{b:02X}");
+    }
+
+    eprintln!("Auth token is: {token}");
+
     let addr = "127.0.0.1:6969";
     let listener = TcpListener::bind(addr)
         .map_err(|err| eprintln!("ERROR: cound not bind {addr}: {}", Sensitive(err)))?;
