@@ -66,7 +66,7 @@ fn main() -> Result<()> {
 
     eprintln!("Auth token is: {token}");
 
-    let addr = "127.0.0.1:6969";
+    let addr = "0.0.0.0:6969";
     let listener = TcpListener::bind(addr)
         .map_err(|err| eprintln!("ERROR: cound not bind {addr}: {}", Sensitive(err)))?;
 
