@@ -1,10 +1,9 @@
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::fmt::Write as FmtWrite;
-use std::io::BufRead;
-use std::io::BufReader;
 use std::io::{Read, Write};
 use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream};
+use std::str;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -199,6 +198,24 @@ fn server(messages: Receiver<Message>) -> Result<()> {
     }
 }
 
+fn authorize(stream: Arc<TcpStream>, addr: &SocketAddr, token: &str) -> Result<()> {
+    let mut buffer: [u8; 32] = [0; 32];
+
+    stream
+        .as_ref()
+        .read_exact(&mut buffer)
+        .map_err(|err| eprintln!("ERROR: Could not read auth token from {}:{}", addr, err))?;
+
+    let user_token = str::from_utf8(&buffer)
+        .map_err(|err| eprintln!("ERROR: token is not valid utf8: {err}"))?;
+
+    if user_token != token {
+        eprintln!("ERROR: User provided invalid token");
+        return Err(());
+    }
+    Ok(())
+}
+
 fn client(stream: Arc<TcpStream>, messages: Sender<Message>, expected_token: String) -> Result<()> {
     let author_addr = stream
         .peer_addr()
@@ -207,46 +224,16 @@ fn client(stream: Arc<TcpStream>, messages: Sender<Message>, expected_token: Str
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
         .map_err(|err| eprintln!("Could not set read timeout on client stream: {err}"))?;
-    let expected_auth_line = format!("AUTH {expected_token}");
-    // TODO: auth check impl
-    // here we can do a check of input from the still unathorized user, if it's a valid token, we just send ClientConnected message
-    // if it's not a valid token we just straiht up closing connection
-    // So we dont have to introduce state on the server
 
-    // let mut received_token = [0u8; 32];
+    authorize(stream.clone(), &author_addr, &expected_token).map_err(|()| {
+        let _ = stream
+            .shutdown(std::net::Shutdown::Both)
+            .map_err(|err| eprintln!("ERROR: Could not shutdown {}:{}", author_addr, err));
+    })?;
 
-    // let token_stored = stream
-    //     .as_ref()
-    //     .read_exact(&mut received_token)
-    //     .map_err(|err| eprintln!("Couldnt read auth message: {err}"));
-
-    // if token_stored.is_ok() {
-    //     if received_token != expected_token.as_bytes() {
-    //         let _ = stream.shutdown(std::net::Shutdown::Both);
-    //         return Ok(());
-    //     }
-    // } else {
-    //     let _ = stream.shutdown(std::net::Shutdown::Both);
-    // }
-    //
-    let reader_stream = stream
-        .try_clone()
-        .map_err(|err| eprintln!("ERROR: Could not clone stream: {err}"))?;
-
-    let mut reader = BufReader::new(reader_stream);
-    let mut auth_line: String = String::new();
-
-    let auth_line_read = reader.read_line(&mut auth_line);
-    if auth_line_read.is_err() {
-        let _ = stream.shutdown(std::net::Shutdown::Both);
-        return Ok(());
-    }
-
-    let auth_line = auth_line.trim_end_matches(['\r', '\n']);
-    if auth_line != expected_auth_line {
-        let _ = stream.shutdown(std::net::Shutdown::Both);
-        return Ok(());
-    }
+    stream.set_read_timeout(None).map_err(|err| {
+        eprintln!("Couldn't disable read timeout after succesful auth on client stream: {err}")
+    })?;
 
     messages
         .send(Message::ClientConnected {
@@ -254,41 +241,28 @@ fn client(stream: Arc<TcpStream>, messages: Sender<Message>, expected_token: Str
         })
         .map_err(|err| eprintln!("ERROR: Could not send message to the server thread: {err}"))?;
 
-    // let mut buffer = [0u8; 64];
-    stream.set_read_timeout(None).map_err(|err| {
-        eprintln!("Couldn't disable read timeout after succesful auth on client stream: {err}")
-    })?;
+    let mut buffer = [0u8; 64];
 
     loop {
-        let mut line = String::new();
-
-        // let bytes_read = stream.as_ref().read(&mut buffer).map_err(|err| {
-        //     eprintln!("ERROR: Could not read message from client {err}");
-        //     let _ = messages.send(Message::ClientDisconnected { author_addr });
-        // })?;
-
-        let bytes_read = reader.read_line(&mut line).map_err(|err| {
-            eprintln!("ERROR: Could not read line from client: {err}");
-            let _ = stream.shutdown(std::net::Shutdown::Both);
+        let bytes_read = stream.as_ref().read(&mut buffer).map_err(|err| {
+            eprintln!("ERROR: Could not read message from client {err}");
+            let _ = messages.send(Message::ClientDisconnected { author_addr });
         })?;
 
         if bytes_read == 0 {
             let _ = messages.send(Message::ClientDisconnected { author_addr });
             return Ok(());
         }
-        // let mut bytes = Vec::new();
+        let mut bytes = Vec::new();
 
-        // for b in &buffer[0..bytes_read].to_vec() {
-        //     if *b >= 32 {
-        //         bytes.push(*b);
-        //     }
-        // }
+        for b in &buffer[0..bytes_read].to_vec() {
+            if *b >= 32 {
+                bytes.push(*b);
+            }
+        }
 
         messages
-            .send(Message::NewMessage {
-                author_addr,
-                bytes: line.into_bytes(),
-            })
+            .send(Message::NewMessage { author_addr, bytes })
             .map_err(|err| {
                 eprintln!("ERROR: Failed to send a message to the server thread: {err}");
             })?;
