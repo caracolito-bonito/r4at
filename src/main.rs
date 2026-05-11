@@ -201,10 +201,15 @@ fn server(messages: Receiver<Message>) -> Result<()> {
 fn authorize(stream: Arc<TcpStream>, addr: &SocketAddr, token: &str) -> Result<()> {
     let mut buffer: [u8; 32] = [0; 32];
 
-    stream
+    let bytes_read = stream
         .as_ref()
-        .read_exact(&mut buffer)
+        .read(&mut buffer)
         .map_err(|err| eprintln!("ERROR: Could not read auth token from {}:{}", addr, err))?;
+
+    if bytes_read < buffer.len() {
+        eprintln!("ERROR: didn't fully read the auth token: only {bytes_read} bytes");
+        return Err(());
+    }
 
     let user_token = str::from_utf8(&buffer)
         .map_err(|err| eprintln!("ERROR: token is not valid utf8: {err}"))?;
@@ -221,15 +226,37 @@ fn client(stream: Arc<TcpStream>, messages: Sender<Message>, expected_token: Str
         .peer_addr()
         .map_err(|err| eprintln!("Could not get peer address: {err}"))?;
 
+    let _ = write!(stream.as_ref(), "Token: ")
+        .map_err(|err| eprintln!("Could not send token prompt to {}: {}", author_addr, err));
+
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
         .map_err(|err| eprintln!("Could not set read timeout on client stream: {err}"))?;
 
     authorize(stream.clone(), &author_addr, &expected_token).map_err(|()| {
+        let _ = writeln!(stream.as_ref(), "Authorization failed!").map_err(|err| {
+            eprintln!(
+                "Could not send auth failed prompt to {}: {}",
+                author_addr, err
+            )
+        });
         let _ = stream
             .shutdown(std::net::Shutdown::Both)
             .map_err(|err| eprintln!("ERROR: Could not shutdown {}:{}", author_addr, err));
     })?;
+
+    let _ = writeln!(
+        stream.as_ref(),
+        "Authorization suceeded, now you can send messages!"
+    )
+    .map_err(|err| {
+        eprintln!(
+            "Could not send auth succesfull prompt to {}: {}",
+            author_addr, err
+        )
+    });
+
+    println!("INFO: {} authorized", author_addr);
 
     stream.set_read_timeout(None).map_err(|err| {
         eprintln!("Couldn't disable read timeout after succesful auth on client stream: {err}")
