@@ -79,7 +79,8 @@ fn main() -> Result<()> {
         match stream {
             Ok(stream) => {
                 let message_sender = message_sender.clone();
-                thread::spawn(|| client(Arc::new(stream), message_sender));
+                let token = token.clone();
+                thread::spawn(move || client(Arc::new(stream), message_sender, token.clone()));
             }
             Err(e) => {
                 eprintln!("ERROR: could not accept connection: {e}")
@@ -140,10 +141,12 @@ fn server(messages: Receiver<Message>) -> Result<()> {
                             strike_count: 0,
                         },
                     );
+                    println!("INFO: Client {author_addr} connected");
                 }
             }
             Message::ClientDisconnected { author_addr } => {
                 clients.remove(&author_addr);
+                println!("INFO: Client {author_addr} disconnected");
             }
             Message::NewMessage { author_addr, bytes } => {
                 if let Some(author) = clients.get_mut(&author_addr) {
@@ -152,11 +155,6 @@ fn server(messages: Receiver<Message>) -> Result<()> {
                     let diff = now
                         .duration_since(author.last_message)
                         .expect("TODO: we shouldn't crash if the clock goes backwards");
-
-                    println!(
-                        "Client {client} trying to send message",
-                        client = author_addr
-                    );
 
                     if diff >= MESSAGE_RATE {
                         if str::from_utf8(&bytes).is_ok() {
@@ -177,6 +175,7 @@ fn server(messages: Receiver<Message>) -> Result<()> {
                                     secs = (BAN_LIMIT - diff).as_secs_f32()
                                 );
                                 let _ = author.conn.shutdown(std::net::Shutdown::Both);
+                                println!("INFO: Client {author_addr} banned");
                             }
                         }
                     } else {
@@ -189,6 +188,7 @@ fn server(messages: Receiver<Message>) -> Result<()> {
                                 secs = (BAN_LIMIT - diff).as_secs_f32()
                             );
                             let _ = author.conn.shutdown(std::net::Shutdown::Both);
+                            println!("INFO: Client {author_addr} disconnected");
                         }
                     }
                 }
@@ -197,7 +197,7 @@ fn server(messages: Receiver<Message>) -> Result<()> {
     }
 }
 
-fn client(stream: Arc<TcpStream>, messages: Sender<Message>) -> Result<()> {
+fn client(stream: Arc<TcpStream>, messages: Sender<Message>, expected_token: String) -> Result<()> {
     let author_addr = stream
         .peer_addr()
         .map_err(|err| eprintln!("Could not get peer address: {err}"))?;
@@ -206,6 +206,22 @@ fn client(stream: Arc<TcpStream>, messages: Sender<Message>) -> Result<()> {
     // here we can do a check of input from the still unathorized user, if it's a valid token, we just send ClientConnected message
     // if it's not a valid token we just straiht up closing connection
     // So we dont have to introduce state on the server
+
+    let mut received_token = [0u8; 32];
+
+    let token_stored = stream
+        .as_ref()
+        .read_exact(&mut received_token)
+        .map_err(|err| eprintln!("Couldnt read auth message: {err}"));
+
+    if token_stored.is_ok() {
+        if received_token != expected_token.as_bytes() {
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+            return Ok(());
+        }
+    } else {
+        let _ = stream.shutdown(std::net::Shutdown::Both);
+    }
 
     messages
         .send(Message::ClientConnected {
