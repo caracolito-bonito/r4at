@@ -190,6 +190,7 @@ fn server(messages: Receiver<Message>, token: String) -> Result<()> {
                                         )
                                     });
                                 } else {
+                                    println!("INFO: User {} failed authentication", author_addr);
                                     let _ = writeln!(author.conn.as_ref(), "Invalid token!")
                                         .map_err(|err| {
                                             eprintln!(
