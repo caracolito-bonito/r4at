@@ -134,16 +134,23 @@ fn server(messages: Receiver<Message>, token: String) -> Result<()> {
                     );
                     let _ = author.shutdown(std::net::Shutdown::Both);
                 } else {
+                    println!("INFO: Client {author_addr} connected");
                     clients.insert(
                         author_addr.clone(),
                         Client {
                             conn: author.clone(),
-                            last_message: now,
+                            last_message: now - 2 * MESSAGE_RATE,
                             strike_count: 0,
                             authenticated: false,
                         },
                     );
-                    println!("INFO: Client {author_addr} connected");
+
+                    let _ = write!(author.as_ref(), "Token: ").map_err(|err| {
+                        eprintln!(
+                            "ERROR: Could not send token prompt to {}: {}",
+                            author_addr, err
+                        )
+                    });
                 }
             }
             Message::ClientDisconnected { author_addr } => {
@@ -170,6 +177,8 @@ fn server(messages: Receiver<Message>, token: String) -> Result<()> {
                                     }
                                 }
                             } else {
+                                let _ = author.conn.set_read_timeout(Some(Duration::from_secs(10)));
+
                                 if text == token {
                                     author.authenticated = true;
                                     let _ = writeln!(
