@@ -168,17 +168,15 @@ fn server(messages: Receiver<Message>, token: String) -> Result<()> {
                     if diff >= MESSAGE_RATE {
                         if let Ok(text) = str::from_utf8(&bytes) {
                             author.last_message = now;
-                            println!("Client {author_addr} sent message {bytes:?}");
 
                             if author.authenticated {
+                                println!("Client {author_addr} sent message {bytes:?}");
                                 for (addr, client) in clients.iter() {
                                     if *addr != author_addr && client.authenticated {
                                         let _ = client.conn.as_ref().write(&bytes);
                                     }
                                 }
                             } else {
-                                let _ = author.conn.set_read_timeout(Some(Duration::from_secs(10)));
-
                                 if text == token {
                                     author.authenticated = true;
                                     let _ = writeln!(
