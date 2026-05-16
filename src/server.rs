@@ -156,7 +156,7 @@ impl Server {
                             author.authenticated = true;
                             let _ = writeln!(
                                 author.conn.as_ref(),
-                                "Authorization suceeded, now you can send messages!"
+                                "Welcome to the club, buddy! Now you can send messages."
                             )
                             .map_err(|err| {
                                 eprintln!(
