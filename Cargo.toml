@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [[bin]]
-name = "main"
-path = "src/main.rs"
+name = "server"
+path = "src/server.rs"
 
 [dependencies]
 getrandom = "0.4.2"
