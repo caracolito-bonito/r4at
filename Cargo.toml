@@ -7,5 +7,10 @@ edition = "2024"
 name = "server"
 path = "src/server.rs"
 
+[[bin]]
+name = "client"
+path = "src/client.rs"
+
 [dependencies]
+crossterm = "0.29.0"
 getrandom = "0.4.2"
