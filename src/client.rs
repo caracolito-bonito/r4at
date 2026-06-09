@@ -1,7 +1,6 @@
 use std::{
     error::Error,
     io::{Write, stdout},
-    process::exit,
     thread,
     time::Duration,
 };
@@ -34,8 +33,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                     KeyCode::Char(c) => {
                         if c == 'c' && event.modifiers.contains(KeyModifiers::CONTROL) {
                             exit = true;
+                        } else {
+                            prompt.push(c);
                         }
-                        prompt.push(c);
                     }
                     KeyCode::Backspace => {
                         prompt.pop();
