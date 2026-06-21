@@ -42,7 +42,7 @@ enum Message {
     ClientDisconnected {
         author_addr: SocketAddr,
     },
-    NewMessage {
+    Received {
         author_addr: SocketAddr,
         bytes: Vec<u8>,
     },
@@ -89,8 +89,7 @@ impl Server {
                 });
 
         if let Some((banned_at, diff)) = banned_at_and_diff_time {
-            self.banned_clients
-                .insert(author_addr.ip().clone(), banned_at);
+            self.banned_clients.insert(author_addr.ip(), banned_at);
 
             let mut author = author.as_ref();
 
@@ -109,7 +108,7 @@ impl Server {
         } else {
             println!("INFO: Client {author_addr} connected");
             self.clients.insert(
-                author_addr.clone(),
+                author_addr,
                 Client {
                     conn: author.clone(),
                     last_message: now - 2 * MESSAGE_RATE,
@@ -141,14 +140,14 @@ impl Server {
                 .expect("TODO: we shouldn't crash if the clock goes backwards");
 
             if diff >= MESSAGE_RATE {
-                if let Ok(text) = str::from_utf8(&bytes) {
+                if let Ok(text) = str::from_utf8(bytes) {
                     author.last_message = now;
 
                     if author.authenticated {
                         println!("Client {author_addr} sent message {bytes:?}");
                         for (addr, client) in self.clients.iter() {
                             if *addr != author_addr && client.authenticated {
-                                let _ = client.conn.as_ref().write(&bytes);
+                                let _ = client.conn.as_ref().write(bytes);
                             }
                         }
                     } else {
@@ -266,7 +265,7 @@ fn server(messages: Receiver<Message>, token: String) -> Result<()> {
             Message::ClientDisconnected { author_addr } => {
                 server.client_disconnected(author_addr);
             }
-            Message::NewMessage { author_addr, bytes } => {
+            Message::Received { author_addr, bytes } => {
                 server.new_message(author_addr, &bytes);
             }
         }
@@ -306,7 +305,7 @@ fn client(stream: Arc<TcpStream>, messages: Sender<Message>) -> Result<()> {
         }
 
         messages
-            .send(Message::NewMessage { author_addr, bytes })
+            .send(Message::Received { author_addr, bytes })
             .map_err(|err| {
                 eprintln!("ERROR: Failed to send a message to the server thread: {err}");
             })?;

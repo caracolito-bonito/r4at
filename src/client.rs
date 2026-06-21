@@ -27,7 +27,7 @@ fn chat_window(
 ) -> Result<(), Box<dyn Error>> {
     let len = messages.len();
 
-    let extra = len.checked_sub(boundary.h as usize).unwrap_or(0);
+    let extra = len.saturating_sub(boundary.h as usize);
     for (dy, line) in messages.iter().skip(extra).enumerate() {
         stdout.queue(MoveTo(boundary.x, boundary.y + dy as u16))?;
         let bytes = line.as_bytes();
@@ -42,7 +42,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut buffer = [0; 64];
 
     let mut stdout = stdout();
-    let _ = terminal::enable_raw_mode()?;
+
+    terminal::enable_raw_mode()?;
+
     let (mut w, mut h) = terminal::size()?;
     let bar = "─";
     let mut border_line = bar.repeat(w as usize);
@@ -104,11 +106,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         )?;
 
         stdout.queue(MoveTo(0, h - 2))?;
-        stdout.write(border_line.as_bytes())?;
+        stdout.write_all(border_line.as_bytes())?;
         stdout.queue(MoveTo(0, h - 1))?;
         {
             let bytes = prompt.as_bytes();
-            stdout.write(bytes.get(0..w as usize).unwrap_or(bytes))?;
+            stdout.write_all(bytes.get(0..w as usize).unwrap_or(bytes))?;
         }
 
         stdout.flush()?;
