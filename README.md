@@ -1,9 +1,30 @@
 # Here is the plan
 
 1. Follow [tsoding tutorial](https://www.youtube.com/watch?v=BbIEuNscn_E) and implement simple multi-user chat using only standard library ⏳
-  - server, client, auth, rate limiting - ✅
+  - server, client, auth, rate limiting ✅
   - tls and security - 📌
-2. Add TUI using ratatui (but first just with crossterm) ⏳
-3. Rewrite it using some external crates like axum may be 📌
-4. Break it trying to optimize something 📌
-5. ... "no tengo ni una puta idea" what i will do next
+2. Add separate client with UI using crossterm ✅
+3. Add TUI using ratatui (but first just with crossterm) ⏳
+4. Rewrite it using some external crates like axum may be 📌
+5. Break it trying to optimize something 📌
+6. ... "no tengo ni una puta idea" what i will do next
+
+
+## Notes
+- if message is rate limited the client doesn't know that
+
+
+## Start instructions
+
+### Server
+```console
+$ cargo run --bin server
+Token: <generated token>
+<logs>
+```
+### Client
+```console
+$ cargo run --bin client 127.0.0.1
+<paste or type token from server>
+<type messages>
+```

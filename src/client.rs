@@ -1,6 +1,6 @@
 use std::{
-    error::Error,
-    io::{ErrorKind, Read, Write, stdout},
+    env,
+    io::{self, ErrorKind, Read, Write, stdout},
     net::TcpStream,
     thread,
     time::Duration,
@@ -20,11 +20,7 @@ struct Rect {
     h: u16,
 }
 
-fn chat_window(
-    stdout: &mut impl Write,
-    messages: &[String],
-    boundary: Rect,
-) -> Result<(), Box<dyn Error>> {
+fn chat_window(stdout: &mut impl Write, messages: &[String], boundary: Rect) -> io::Result<()> {
     let len = messages.len();
 
     let extra = len.saturating_sub(boundary.h as usize);
@@ -36,9 +32,15 @@ fn chat_window(
     Ok(())
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
-    let mut stream = TcpStream::connect("127.0.0.1:6969").unwrap();
+fn main() -> io::Result<()> {
+    let mut args = env::args();
+    let _name = args.next().expect("program name");
+    let address = args.next().expect("provde ip address");
+
+    let mut stream = TcpStream::connect(format!("{address}:6969"))?;
+
     let _ = stream.set_nonblocking(true);
+
     let mut buffer = [0; 64];
 
     let mut stdout = stdout();
