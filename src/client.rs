@@ -10,6 +10,7 @@ use crossterm::{
     QueueableCommand,
     cursor::MoveTo,
     event::{Event, KeyCode, KeyModifiers, poll, read},
+    style::Print,
     terminal::{self, Clear},
 };
 
@@ -36,14 +37,16 @@ impl Drop for RawMode {
     }
 }
 
-fn chat_window(stdout: &mut impl Write, messages: &[String], boundary: Rect) -> io::Result<()> {
+fn chat_window(
+    qc: &mut impl QueueableCommand,
+    messages: &[String],
+    boundary: Rect,
+) -> io::Result<()> {
     let len = messages.len();
-
     let extra = len.saturating_sub(boundary.h as usize);
     for (dy, line) in messages.iter().skip(extra).enumerate() {
-        stdout.queue(MoveTo(boundary.x, boundary.y + dy as u16))?;
-        let bytes = line.as_bytes();
-        stdout.write_all(bytes.get(0..boundary.w as usize).unwrap_or(bytes))?;
+        qc.queue(MoveTo(boundary.x, boundary.y + dy as u16))?;
+        qc.queue(Print(line.get(0..boundary.w as usize).unwrap_or(&line)))?;
     }
     Ok(())
 }
