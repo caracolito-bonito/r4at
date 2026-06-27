@@ -127,12 +127,9 @@ fn main() -> io::Result<()> {
         )?;
 
         stdout.queue(MoveTo(0, h - 2))?;
-        stdout.write_all(border_line.as_bytes())?;
+        stdout.queue(Print(&border_line))?;
         stdout.queue(MoveTo(0, h - 1))?;
-        {
-            let bytes = prompt.as_bytes();
-            stdout.write_all(bytes.get(0..w as usize).unwrap_or(bytes))?;
-        }
+        stdout.queue(Print(prompt.get(0..w as usize).unwrap_or(&prompt)))?;
 
         stdout.flush()?;
         thread::sleep(Duration::from_millis(16));
