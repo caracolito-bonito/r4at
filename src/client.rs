@@ -20,6 +20,22 @@ struct Rect {
     h: u16,
 }
 
+struct RawMode;
+
+impl RawMode {
+    fn enable() -> io::Result<Self> {
+        terminal::enable_raw_mode()?;
+        Ok(Self)
+    }
+}
+
+impl Drop for RawMode {
+    fn drop(&mut self) {
+        let _ =
+            terminal::disable_raw_mode().map_err(|err| eprintln!("ERROR: disable raw mode: {err}"));
+    }
+}
+
 fn chat_window(stdout: &mut impl Write, messages: &[String], boundary: Rect) -> io::Result<()> {
     let len = messages.len();
 
@@ -45,7 +61,7 @@ fn main() -> io::Result<()> {
 
     let mut stdout = stdout();
 
-    terminal::enable_raw_mode()?;
+    let _raw_mode = RawMode::enable()?;
 
     let (mut w, mut h) = terminal::size()?;
     let bar = "─";
@@ -88,7 +104,7 @@ fn main() -> io::Result<()> {
             Ok(n) => chat.push(String::from_utf8_lossy(&buffer[0..n]).into_owned()),
             Err(e) => {
                 if e.kind() != ErrorKind::WouldBlock {
-                    panic!("{e}")
+                    return Err(e);
                 }
             }
         }
@@ -118,6 +134,5 @@ fn main() -> io::Result<()> {
         stdout.flush()?;
         thread::sleep(Duration::from_millis(16));
     }
-    terminal::disable_raw_mode()?;
     Ok(())
 }
