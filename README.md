@@ -1,14 +1,20 @@
-# Here is the plan
+# Here is the high level plan
 
 1. Follow [tsoding tutorial](https://www.youtube.com/watch?v=BbIEuNscn_E) and implement simple multi-user chat using only standard library ⏳
   - server, client, auth, rate limiting ✅
   - tls and security - 📌
 2. Add separate client with UI using crossterm ✅
-3. Add TUI using ratatui (but first just with crossterm) ⏳
+3. Add TUI using ratatui (but first just with crossterm) ⏳  
 4. Rewrite it using some external crates like axum may be 📌
 5. Break it trying to optimize something 📌
 6. ... "no tengo ni una puta idea" what i will do next
 
+
+## Small steps to do next time:
+- add the ability to start client without ip-address
+- add commands to connect, disconnect and help
+- add status bar (to show connected/disconnected for now)
+- make it all pretty using ratatui
 
 ## Notes
 - if message is rate limited the client doesn't know that

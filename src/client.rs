@@ -52,9 +52,7 @@ fn chat_window(
 }
 
 fn main() -> io::Result<()> {
-    let mut args = env::args();
-    let _name = args.next().expect("program name");
-    let address = args.next().expect("provde ip address");
+    let address = env::args().skip(1).next().expect("Provide IP please");
 
     let mut stream = TcpStream::connect(format!("{address}:6969"))?;
 
