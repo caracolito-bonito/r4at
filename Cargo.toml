@@ -14,3 +14,4 @@ path = "src/client.rs"
 [dependencies]
 crossterm = "0.29.0"
 getrandom = "0.4.2"
+ratatui = "0.30.2"
