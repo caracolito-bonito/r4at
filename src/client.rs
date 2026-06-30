@@ -1,11 +1,11 @@
 use std::io;
 
-use crossterm::{event::KeyEvent, style::Stylize};
+use crossterm::event::KeyEvent;
 use ratatui::{
     layout::{Constraint, Layout},
-    style::Style,
+    style::{Color, Style},
     symbols::border,
-    text::{Line, Span},
+    text::{Line, Span, Text},
     widgets::{Block, Paragraph, Widget},
 };
 
@@ -16,8 +16,16 @@ enum Event {
     Disconnect,
 }
 
+enum Status {
+    Connected,
+    Disconnected,
+}
+
 struct App {
     exit: bool,
+    messages: Vec<String>,
+    user_message: String,
+    status: Status,
 }
 impl App {
     fn run(&mut self, terminal: &mut ratatui::DefaultTerminal) -> io::Result<()> {
@@ -45,32 +53,54 @@ impl Widget for &App {
         let [messages_area, status_area, input_area] = vertical_layout.areas(area);
 
         let instructions_for_input = Line::from(vec![
-            Span::styled(" Clear all ", Style::new()),
-            Span::styled(" <ESC> ", Style::new()),
-            Span::styled(" Exit ", Style::new()),
-            Span::styled(" <Control + Q> ", Style::new()),
+            Span::styled(" Clear all ", Style::new().italic()),
+            Span::styled(" <ESC> ", Style::new().italic()),
+            Span::styled(" Exit ", Style::new().italic()),
+            Span::styled(" <Control + Q> ", Style::new().italic()),
         ])
         .centered();
 
-        let block = Block::bordered()
+        let input_block = Block::bordered()
             .title_bottom(instructions_for_input)
             .border_set(border::THICK);
 
-        let input_par = Paragraph::new("Type your message here").block(block);
+        Paragraph::new(self.user_message.as_str())
+            .block(input_block)
+            .render(input_area, buf);
 
-        input_par.render(input_area, buf);
+        let (status_text, status_color) = match self.status {
+            Status::Connected => ("CONNECTED", Color::LightGreen),
+            Status::Disconnected => ("DISCONNECTED", Color::Gray),
+        };
 
-        // let line = Line::from(vec![
-        //     Span::styled("Hello", Style::new().blue()),
-        //     Span::raw(" world!"),
-        // ]);
+        Paragraph::new(status_text)
+            .centered()
+            .style(Style::new().bg(status_color))
+            .render(status_area, buf);
+
+        let messages_block = Block::bordered().border_set(border::THICK);
+
+        let messages_as_lines: Vec<Line> = self
+            .messages
+            .iter()
+            .map(|message| Line::from(message.as_str()))
+            .collect();
+
+        Paragraph::new(Text::from(messages_as_lines))
+            .block(messages_block)
+            .render(messages_area, buf);
     }
 }
 
 fn main() -> io::Result<()> {
     let mut terminal = ratatui::init();
 
-    let mut app = App { exit: false };
+    let mut app = App {
+        exit: false,
+        messages: vec!["hello".to_string(), "hi, bro".to_string()],
+        user_message: "".to_string(),
+        status: Status::Disconnected,
+    };
     let app_result = app.run(&mut terminal);
     ratatui::restore();
     app_result

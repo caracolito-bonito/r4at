@@ -13,8 +13,10 @@
 ## Small steps to do next time:
 - add the ability to start client without ip-address
 - add commands to connect, disconnect and help
-- add status bar (to show connected/disconnected for now)
-- make it all pretty using ratatui
+- add status bar (to show connected/disconnected for now) ✅
+- make it all pretty using ratatui ⏳
+  - need to make widget for messages scrollable to show only last N messages if count is more than height of the area! 📌
+
 
 ## Notes
 - if message is rate limited the client doesn't know that
