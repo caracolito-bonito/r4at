@@ -1,136 +1,107 @@
-use std::{
-    env,
-    io::{self, ErrorKind, Read, Write, stdout},
-    net::TcpStream,
-    thread,
-    time::Duration,
+use std::io;
+
+use crossterm::event::KeyEvent;
+use ratatui::{
+    layout::{Constraint, Layout},
+    style::{Color, Style},
+    symbols::border,
+    text::{Line, Span, Text},
+    widgets::{Block, Paragraph, Widget},
 };
 
-use crossterm::{
-    QueueableCommand,
-    cursor::MoveTo,
-    event::{Event, KeyCode, KeyModifiers, poll, read},
-    style::Print,
-    terminal::{self, Clear},
-};
-
-struct Rect {
-    x: u16,
-    y: u16,
-    w: u16,
-    h: u16,
+#[allow(unused)]
+enum Event {
+    Input(KeyEvent),
+    Chat(String),
+    Disconnect,
 }
 
-struct RawMode;
+enum Status {
+    Connected,
+    Disconnected,
+}
 
-impl RawMode {
-    fn enable() -> io::Result<Self> {
-        terminal::enable_raw_mode()?;
-        Ok(Self)
+struct App {
+    exit: bool,
+    messages: Vec<String>,
+    user_message: String,
+    status: Status,
+}
+impl App {
+    fn run(&mut self, terminal: &mut ratatui::DefaultTerminal) -> io::Result<()> {
+        while !self.exit {
+            terminal.draw(|frame| self.draw(frame))?;
+        }
+        Ok(())
+    }
+
+    fn draw(&self, frame: &mut ratatui::prelude::Frame<'_>) {
+        frame.render_widget(self, frame.area());
     }
 }
 
-impl Drop for RawMode {
-    fn drop(&mut self) {
-        let _ =
-            terminal::disable_raw_mode().map_err(|err| eprintln!("ERROR: disable raw mode: {err}"));
-    }
-}
+impl Widget for &App {
+    fn render(self, area: ratatui::prelude::Rect, buf: &mut ratatui::prelude::Buffer)
+    where
+        Self: Sized,
+    {
+        let vertical_layout = Layout::vertical([
+            Constraint::Fill(1),
+            Constraint::Length(1),
+            Constraint::Length(3),
+        ]);
+        let [messages_area, status_area, input_area] = vertical_layout.areas(area);
 
-fn chat_window(
-    qc: &mut impl QueueableCommand,
-    messages: &[String],
-    boundary: Rect,
-) -> io::Result<()> {
-    let len = messages.len();
-    let extra = len.saturating_sub(boundary.h as usize);
-    for (dy, line) in messages.iter().skip(extra).enumerate() {
-        qc.queue(MoveTo(boundary.x, boundary.y + dy as u16))?;
-        qc.queue(Print(line.get(0..boundary.w as usize).unwrap_or(&line)))?;
+        let instructions_for_input = Line::from(vec![
+            Span::styled(" Clear all ", Style::new().italic()),
+            Span::styled(" <ESC> ", Style::new().italic()),
+            Span::styled(" Exit ", Style::new().italic()),
+            Span::styled(" <Control + Q> ", Style::new().italic()),
+        ])
+        .centered();
+
+        let input_block = Block::bordered()
+            .title_bottom(instructions_for_input)
+            .border_set(border::THICK);
+
+        Paragraph::new(self.user_message.as_str())
+            .block(input_block)
+            .render(input_area, buf);
+
+        let (status_text, status_color) = match self.status {
+            Status::Connected => ("CONNECTED", Color::LightGreen),
+            Status::Disconnected => ("DISCONNECTED", Color::Gray),
+        };
+
+        Paragraph::new(status_text)
+            .centered()
+            .style(Style::new().bg(status_color))
+            .render(status_area, buf);
+
+        let messages_block = Block::bordered().border_set(border::THICK);
+
+        let messages_as_lines: Vec<Line> = self
+            .messages
+            .iter()
+            .map(|message| Line::from(message.as_str()))
+            .collect();
+
+        Paragraph::new(Text::from(messages_as_lines))
+            .block(messages_block)
+            .render(messages_area, buf);
     }
-    Ok(())
 }
 
 fn main() -> io::Result<()> {
-    let address = env::args().skip(1).next().expect("Provide IP please");
+    let mut terminal = ratatui::init();
 
-    let mut stream = TcpStream::connect(format!("{address}:6969"))?;
-
-    let _ = stream.set_nonblocking(true);
-
-    let mut buffer = [0; 64];
-
-    let mut stdout = stdout();
-
-    let _raw_mode = RawMode::enable()?;
-
-    let (mut w, mut h) = terminal::size()?;
-    let bar = "─";
-    let mut border_line = bar.repeat(w as usize);
-    let mut prompt = String::new();
-    let mut exit = false;
-    let mut chat = Vec::new();
-    while !exit {
-        while poll(Duration::ZERO)? {
-            match read()? {
-                Event::Resize(nw, nh) => {
-                    w = nw;
-                    h = nh;
-                    border_line = bar.repeat(w as usize);
-                }
-                Event::Key(event) => match event.code {
-                    KeyCode::Char(c) => {
-                        if c == 'c' && event.modifiers.contains(KeyModifiers::CONTROL) {
-                            exit = true;
-                        } else {
-                            prompt.push(c);
-                        }
-                    }
-                    KeyCode::Backspace => {
-                        prompt.pop();
-                    }
-                    KeyCode::Enter => {
-                        stream.write_all(prompt.as_bytes())?;
-                        chat.push(prompt.clone());
-                        prompt.clear();
-                    }
-                    _ => {}
-                },
-                _ => {}
-            }
-        }
-
-        match stream.read(&mut buffer) {
-            Ok(0) => break,
-            Ok(n) => chat.push(String::from_utf8_lossy(&buffer[0..n]).into_owned()),
-            Err(e) => {
-                if e.kind() != ErrorKind::WouldBlock {
-                    return Err(e);
-                }
-            }
-        }
-
-        // rendering chat window
-        stdout.queue(Clear(terminal::ClearType::All))?;
-
-        chat_window(
-            &mut stdout,
-            &chat,
-            Rect {
-                x: 0,
-                y: 0,
-                w,
-                h: h - 2,
-            },
-        )?;
-
-        stdout.queue(MoveTo(0, h - 2))?;
-        stdout.queue(Print(&border_line))?;
-        stdout.queue(MoveTo(0, h - 1))?;
-        stdout.queue(Print(prompt.get(0..w as usize).unwrap_or(&prompt)))?;
-
-        stdout.flush()?;
-        thread::sleep(Duration::from_millis(16));
-    }
-    Ok(())
+    let mut app = App {
+        exit: false,
+        messages: vec!["hello".to_string(), "hi, bro".to_string()],
+        user_message: "".to_string(),
+        status: Status::Disconnected,
+    };
+    let app_result = app.run(&mut terminal);
+    ratatui::restore();
+    app_result
 }
