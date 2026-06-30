@@ -1,6 +1,6 @@
-use std::io;
+use std::{io, sync::mpsc, thread};
 
-use crossterm::event::KeyEvent;
+use crossterm::event::{self, Event as CtEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::{
     layout::{Constraint, Layout},
     style::{Color, Style},
@@ -11,7 +11,7 @@ use ratatui::{
 
 #[allow(unused)]
 enum Event {
-    Input(KeyEvent),
+    Terminal(CtEvent),
     Chat(String),
     Disconnect,
 }
@@ -28,15 +28,34 @@ struct App {
     status: Status,
 }
 impl App {
-    fn run(&mut self, terminal: &mut ratatui::DefaultTerminal) -> io::Result<()> {
+    fn run(
+        &mut self,
+        terminal: &mut ratatui::DefaultTerminal,
+        rx: mpsc::Receiver<Event>,
+    ) -> io::Result<()> {
         while !self.exit {
             terminal.draw(|frame| self.draw(frame))?;
+
+            match rx.recv().unwrap() {
+                Event::Terminal(CtEvent::Key(k)) => self.handle_key_events(k)?,
+                Event::Terminal(_) => {}
+                Event::Chat(_) => todo!(),
+                Event::Disconnect => self.status = Status::Disconnected,
+            }
         }
         Ok(())
     }
 
     fn draw(&self, frame: &mut ratatui::prelude::Frame<'_>) {
         frame.render_widget(self, frame.area());
+    }
+
+    fn handle_key_events(&mut self, event: KeyEvent) -> std::io::Result<()> {
+        match (event.kind, event.code, event.modifiers) {
+            (KeyEventKind::Press, KeyCode::Char('q'), KeyModifiers::CONTROL) => self.exit = true,
+            _ => {}
+        }
+        Ok(())
     }
 }
 
@@ -101,7 +120,17 @@ fn main() -> io::Result<()> {
         user_message: "".to_string(),
         status: Status::Disconnected,
     };
-    let app_result = app.run(&mut terminal);
-    ratatui::restore();
+
+    let (tx_input_events, event_rx) = mpsc::channel::<Event>();
+
+    thread::spawn(move || handle_input_events(tx_input_events));
+
+    let app_result = app.run(&mut terminal, event_rx);
     app_result
+}
+
+fn handle_input_events(tx: mpsc::Sender<Event>) {
+    loop {
+        tx.send(Event::Terminal(event::read().unwrap())).unwrap()
+    }
 }

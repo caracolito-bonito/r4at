@@ -15,7 +15,8 @@
 - add commands to connect, disconnect and help
 - add status bar (to show connected/disconnected for now) ✅
 - make it all pretty using ratatui ⏳
-  - need to make widget for messages scrollable to show only last N messages if count is more than height of the area! 📌
+  - need to make widget for messages scrollable to show only last N messages if count is more than height of the area! 
+  - unwraps in handling events
 
 
 ## Notes
