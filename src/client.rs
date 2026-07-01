@@ -1,6 +1,10 @@
 use std::{io, sync::mpsc, thread};
 
-use crossterm::event::{self, Event as CtEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    self,
+    Event::{self as CtEvent},
+    KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
+};
 use ratatui::{
     layout::{Constraint, Layout},
     style::{Color, Style},
@@ -53,6 +57,22 @@ impl App {
     fn handle_key_events(&mut self, event: KeyEvent) -> std::io::Result<()> {
         match (event.kind, event.code, event.modifiers) {
             (KeyEventKind::Press, KeyCode::Char('q'), KeyModifiers::CONTROL) => self.exit = true,
+            (KeyEventKind::Press, KeyCode::Backspace, KeyModifiers::NONE) => {
+                let _ = self.user_message.pop();
+            }
+            (KeyEventKind::Press, KeyCode::Esc, KeyModifiers::NONE) => {
+                self.user_message.clear();
+            }
+            (KeyEventKind::Press, KeyCode::Enter, KeyModifiers::NONE) => {
+                self.messages.push(self.user_message.clone());
+                self.user_message.clear();
+            }
+            (KeyEventKind::Press, KeyCode::Char(c), modifier)
+                if modifier == KeyModifiers::NONE || modifier == KeyModifiers::SHIFT =>
+            {
+                self.user_message.push(c);
+            }
+
             _ => {}
         }
         Ok(())
@@ -116,7 +136,7 @@ fn main() -> io::Result<()> {
 
     let mut app = App {
         exit: false,
-        messages: vec!["hello".to_string(), "hi, bro".to_string()],
+        messages: vec![],
         user_message: "".to_string(),
         status: Status::Disconnected,
     };
