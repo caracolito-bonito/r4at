@@ -1,4 +1,10 @@
-use std::{io, sync::mpsc, thread};
+use std::{
+    env,
+    io::{self, Read, Write},
+    net::TcpStream,
+    sync::mpsc,
+    thread,
+};
 
 use crossterm::event::{
     self,
@@ -30,6 +36,7 @@ struct App {
     messages: Vec<String>,
     user_message: String,
     status: Status,
+    stream: TcpStream,
 }
 impl App {
     fn run(
@@ -42,9 +49,11 @@ impl App {
 
             match rx.recv().unwrap() {
                 Event::Terminal(CtEvent::Key(k)) => self.handle_key_events(k)?,
-                Event::Terminal(_) => {}
-                Event::Chat(_) => todo!(),
+                Event::Chat(message) => {
+                    self.messages.push(message);
+                }
                 Event::Disconnect => self.status = Status::Disconnected,
+                Event::Terminal(_) => {}
             }
         }
         Ok(())
@@ -64,6 +73,7 @@ impl App {
                 self.user_message.clear();
             }
             (KeyEventKind::Press, KeyCode::Enter, KeyModifiers::NONE) => {
+                let _ = self.stream.write_all(self.user_message.as_bytes());
                 self.messages.push(self.user_message.clone());
                 self.user_message.clear();
             }
@@ -133,20 +143,50 @@ impl Widget for &App {
 
 fn main() -> io::Result<()> {
     let mut terminal = ratatui::init();
+    let addr = env::args().nth(1).expect("provide ip address");
+
+    let stream_read = TcpStream::connect(format!("{addr}:6969"))?;
+
+    let stream_write = stream_read.try_clone()?;
 
     let mut app = App {
         exit: false,
         messages: vec![],
         user_message: "".to_string(),
-        status: Status::Disconnected,
+        status: Status::Connected,
+        stream: stream_write,
     };
 
-    let (tx_input_events, event_rx) = mpsc::channel::<Event>();
+    let (tx_input, event_rx) = mpsc::channel::<Event>();
+    let tx_reader = tx_input.clone();
 
-    thread::spawn(move || handle_input_events(tx_input_events));
+    thread::spawn(move || handle_input_events(tx_input));
+    thread::spawn(move || handle_chat_events(tx_reader, stream_read));
 
     let app_result = app.run(&mut terminal, event_rx);
     app_result
+}
+
+fn handle_chat_events(tx_reader: mpsc::Sender<Event>, mut stream: TcpStream) {
+    let mut buffer = [0; 64];
+
+    loop {
+        match stream.read(&mut buffer) {
+            Ok(0) => {
+                tx_reader.send(Event::Disconnect).unwrap();
+                break;
+            }
+            Ok(n) => tx_reader
+                .send(Event::Chat(
+                    String::from_utf8_lossy(&buffer[0..n]).into_owned(),
+                ))
+                .unwrap(),
+            Err(_) => {
+                tx_reader.send(Event::Disconnect).unwrap();
+                break;
+            }
+        }
+    }
 }
 
 fn handle_input_events(tx: mpsc::Sender<Event>) {
