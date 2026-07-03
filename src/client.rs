@@ -15,8 +15,8 @@ use ratatui::{
     layout::{Constraint, Layout},
     style::{Color, Style},
     symbols::border,
-    text::{Line, Span, Text},
-    widgets::{Block, Paragraph, Widget},
+    text::{Line, Span},
+    widgets::{Block, List, ListState, Paragraph},
 };
 
 #[allow(unused)]
@@ -37,6 +37,7 @@ struct App {
     user_message: String,
     status: Status,
     stream: TcpStream,
+    chat_state: ListState,
 }
 impl App {
     fn run(
@@ -50,7 +51,7 @@ impl App {
             match rx.recv().unwrap() {
                 Event::Terminal(CtEvent::Key(k)) => self.handle_key_events(k)?,
                 Event::Chat(message) => {
-                    self.messages.push(message);
+                    self.push_message(message);
                 }
                 Event::Disconnect => self.status = Status::Disconnected,
                 Event::Terminal(_) => {}
@@ -59,47 +60,13 @@ impl App {
         Ok(())
     }
 
-    fn draw(&self, frame: &mut ratatui::prelude::Frame<'_>) {
-        frame.render_widget(self, frame.area());
-    }
-
-    fn handle_key_events(&mut self, event: KeyEvent) -> std::io::Result<()> {
-        match (event.kind, event.code, event.modifiers) {
-            (KeyEventKind::Press, KeyCode::Char('q'), KeyModifiers::CONTROL) => self.exit = true,
-            (KeyEventKind::Press, KeyCode::Backspace, KeyModifiers::NONE) => {
-                let _ = self.user_message.pop();
-            }
-            (KeyEventKind::Press, KeyCode::Esc, KeyModifiers::NONE) => {
-                self.user_message.clear();
-            }
-            (KeyEventKind::Press, KeyCode::Enter, KeyModifiers::NONE) => {
-                let _ = self.stream.write_all(self.user_message.as_bytes());
-                self.messages.push(self.user_message.clone());
-                self.user_message.clear();
-            }
-            (KeyEventKind::Press, KeyCode::Char(c), modifier)
-                if modifier == KeyModifiers::NONE || modifier == KeyModifiers::SHIFT =>
-            {
-                self.user_message.push(c);
-            }
-
-            _ => {}
-        }
-        Ok(())
-    }
-}
-
-impl Widget for &App {
-    fn render(self, area: ratatui::prelude::Rect, buf: &mut ratatui::prelude::Buffer)
-    where
-        Self: Sized,
-    {
+    fn draw(&mut self, frame: &mut ratatui::prelude::Frame<'_>) {
         let vertical_layout = Layout::vertical([
             Constraint::Fill(1),
             Constraint::Length(1),
             Constraint::Length(3),
         ]);
-        let [messages_area, status_area, input_area] = vertical_layout.areas(area);
+        let [chat_area, status_area, input_area] = vertical_layout.areas(frame.area());
 
         let instructions_for_input = Line::from(vec![
             Span::styled(" Clear all ", Style::new().italic()),
@@ -113,31 +80,60 @@ impl Widget for &App {
             .title_bottom(instructions_for_input)
             .border_set(border::THICK);
 
-        Paragraph::new(self.user_message.as_str())
-            .block(input_block)
-            .render(input_area, buf);
+        let input = Paragraph::new(self.user_message.as_str()).block(input_block);
+
+        frame.render_widget(input, input_area);
 
         let (status_text, status_color) = match self.status {
             Status::Connected => ("CONNECTED", Color::LightGreen),
             Status::Disconnected => ("DISCONNECTED", Color::Gray),
         };
-
-        Paragraph::new(status_text)
+        let status = Paragraph::new(status_text)
             .centered()
-            .style(Style::new().bg(status_color))
-            .render(status_area, buf);
+            .style(Style::new().bg(status_color));
 
-        let messages_block = Block::bordered().border_set(border::THICK);
+        frame.render_widget(status, status_area);
 
-        let messages_as_lines: Vec<Line> = self
+        let chat_block = Block::bordered().border_set(border::THICK);
+
+        let message_list: Vec<Line> = self
             .messages
             .iter()
             .map(|message| Line::from(message.as_str()))
             .collect();
+        let chat = List::new(message_list).block(chat_block);
 
-        Paragraph::new(Text::from(messages_as_lines))
-            .block(messages_block)
-            .render(messages_area, buf);
+        frame.render_stateful_widget(chat, chat_area, &mut self.chat_state);
+    }
+
+    fn handle_key_events(&mut self, event: KeyEvent) -> std::io::Result<()> {
+        match (event.kind, event.code, event.modifiers) {
+            (KeyEventKind::Press, KeyCode::Char('q'), KeyModifiers::CONTROL) => self.exit = true,
+            (KeyEventKind::Press, KeyCode::Backspace, KeyModifiers::NONE) => {
+                let _ = self.user_message.pop();
+            }
+            (KeyEventKind::Press, KeyCode::Esc, KeyModifiers::NONE) => {
+                self.user_message.clear();
+            }
+            (KeyEventKind::Press, KeyCode::Enter, KeyModifiers::NONE) => {
+                let _ = self.stream.write_all(self.user_message.as_bytes());
+                self.push_message(self.user_message.clone());
+                self.user_message.clear();
+            }
+            (KeyEventKind::Press, KeyCode::Char(c), modifier)
+                if modifier == KeyModifiers::NONE || modifier == KeyModifiers::SHIFT =>
+            {
+                self.user_message.push(c);
+            }
+
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn push_message(&mut self, message: String) {
+        self.messages.push(message);
+        self.chat_state.select(Some(self.messages.len() - 1));
     }
 }
 
@@ -155,6 +151,7 @@ fn main() -> io::Result<()> {
         user_message: "".to_string(),
         status: Status::Connected,
         stream: stream_write,
+        chat_state: ListState::default(),
     };
 
     let (tx_input, event_rx) = mpsc::channel::<Event>();
