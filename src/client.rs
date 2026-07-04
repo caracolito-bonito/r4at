@@ -125,7 +125,12 @@ impl App {
             {
                 self.user_message.push(c);
             }
-
+            (KeyEventKind::Press, KeyCode::Up, KeyModifiers::NONE) => {
+                self.chat_state.scroll_up_by(5);
+            }
+            (KeyEventKind::Press, KeyCode::Down, KeyModifiers::NONE) => {
+                self.chat_state.scroll_down_by(5);
+            }
             _ => {}
         }
         Ok(())
