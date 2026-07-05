@@ -3,7 +3,7 @@ use std::{
     io::{self, Read, Write},
     net::TcpStream,
     sync::mpsc,
-    thread,
+    thread, usize,
 };
 
 use crossterm::event::{
@@ -15,7 +15,7 @@ use ratatui::{
     layout::{Constraint, Layout},
     style::{Color, Style},
     symbols::border,
-    text::{Line, Span},
+    text::{Line, Span, Text},
     widgets::{Block, List, ListState, Paragraph},
 };
 
@@ -61,10 +61,16 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut ratatui::prelude::Frame<'_>) {
+        let input_width = frame.area().width.saturating_sub(2).max(1);
+
+        let input_lines = wrap_text(&self.user_message, input_width as usize);
+
+        let input_height = (input_lines.len().max(1) + 2).min(6);
+
         let vertical_layout = Layout::vertical([
             Constraint::Fill(1),
             Constraint::Length(1),
-            Constraint::Length(3),
+            Constraint::Length(input_height as u16),
         ]);
         let [chat_area, status_area, input_area] = vertical_layout.areas(frame.area());
 
@@ -80,7 +86,7 @@ impl App {
             .title_bottom(instructions_for_input)
             .border_set(border::THICK);
 
-        let input = Paragraph::new(self.user_message.as_str()).block(input_block);
+        let input = Paragraph::new(Text::from(input_lines)).block(input_block);
 
         frame.render_widget(input, input_area);
 
@@ -95,12 +101,15 @@ impl App {
         frame.render_widget(status, status_area);
 
         let chat_block = Block::bordered().border_set(border::THICK);
+        let chat_width = chat_area.width.saturating_sub(2).max(1);
 
-        let message_list: Vec<Line> = self
+        let message_list: Vec<Text> = self
             .messages
             .iter()
-            .map(|message| Line::from(message.as_str()))
+            .map(|m| wrap_text(m, chat_width as usize))
+            .map(|wm| Text::from(wm))
             .collect();
+
         let chat = List::new(message_list).block(chat_block);
 
         frame.render_stateful_widget(chat, chat_area, &mut self.chat_state);
@@ -140,6 +149,16 @@ impl App {
         self.messages.push(message);
         self.chat_state.select(Some(self.messages.len() - 1));
     }
+}
+
+fn wrap_text(message: &str, width: usize) -> Vec<Line<'static>> {
+    let wrapped = message
+        .chars()
+        .collect::<Vec<char>>()
+        .chunks(width)
+        .map(|chunk| Line::from(chunk.iter().collect::<String>()))
+        .collect();
+    wrapped
 }
 
 fn main() -> io::Result<()> {
