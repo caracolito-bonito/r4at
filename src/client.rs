@@ -125,9 +125,7 @@ impl App {
                 self.user_message.clear();
             }
             (KeyEventKind::Press, KeyCode::Enter, KeyModifiers::NONE) => {
-                let _ = self.stream.write_all(self.user_message.as_bytes());
-                self.push_message(self.user_message.clone());
-                self.user_message.clear();
+                self.submit();
             }
             (KeyEventKind::Press, KeyCode::Char(c), modifier)
                 if modifier == KeyModifiers::NONE || modifier == KeyModifiers::SHIFT =>
@@ -148,6 +146,26 @@ impl App {
     fn push_message(&mut self, message: String) {
         self.messages.push(message);
         self.chat_state.select(Some(self.messages.len() - 1));
+    }
+    fn submit(&mut self) {
+        let message = self.user_message.clone();
+
+        match message.strip_prefix("/") {
+            Some(rest) => {
+                let (command, argument) = rest.split_once(' ').unwrap_or((rest, ""));
+                match command {
+                    "help" => {
+                        self.push_message("/help <command> — print help".into());
+                    }
+                    _ => todo!(),
+                }
+            }
+            None => {
+                let _ = self.stream.write_all(message.as_bytes());
+                self.push_message(message);
+            }
+        }
+        self.user_message.clear();
     }
 }
 

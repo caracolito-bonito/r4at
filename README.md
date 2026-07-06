@@ -13,14 +13,14 @@
 
 ## Additional things:
 - add the ability to start client without ip-address
-- add commands to connect, disconnect and help
+- add commands to connect, disconnect and help ⏳
 - add status bar (to show connected/disconnected for now) ✅
-  
+- make service messages in chat colorful   
 
 
 ## To fix
   - unwraps in senders
-  - need to make widget for messages scrollable to show only last N messages if count is more than height of the area! 
+  - need to make widget for messages scrollable to show only last N messages if count is more than height of the area! ✅
 
 
 ## Start instructions
