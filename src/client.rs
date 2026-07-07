@@ -36,7 +36,8 @@ struct App {
     messages: Vec<String>,
     user_message: String,
     status: Status,
-    stream: TcpStream,
+    stream: Option<TcpStream>,
+    event_tx: mpsc::Sender<Event>,
     chat_state: ListState,
 }
 impl App {
@@ -157,15 +158,43 @@ impl App {
                     "help" => {
                         self.push_message("/help <command> — print help".into());
                     }
+                    "connect" => {
+                        if argument.is_empty() {
+                            self.push_message(String::from("/connect <ip> - connects to a server"));
+                            return;
+                        }
+                        self.connect(argument);
+                    }
                     _ => todo!(),
                 }
             }
             None => {
-                let _ = self.stream.write_all(message.as_bytes());
-                self.push_message(message);
+                let stream = self.stream.as_mut();
+                if let Some(stream) = stream {
+                    let _ = stream.write_all(message.as_bytes());
+                    self.push_message(message);
+                } else {
+                    self.push_message(String::from(
+                        "You are disconnected. Your message wasn't delivered. Try to reconnect",
+                    ));
+                }
             }
         }
         self.user_message.clear();
+    }
+    fn connect(&mut self, ip: &str) {
+        let Ok(stream) = TcpStream::connect(format!("{ip}:6969")) else {
+            self.push_message(String::from("Couldn't reach IP"));
+            return;
+        };
+        let Ok(write_half) = stream.try_clone() else {
+            self.push_message(String::from("Couldn't create write half for a stream"));
+            return;
+        };
+        self.stream = Some(write_half);
+        let event_tx = self.event_tx.clone();
+        thread::spawn(move || handle_chat_events(event_tx, stream));
+        self.status = Status::Connected;
     }
 }
 
@@ -181,26 +210,24 @@ fn wrap_text(message: &str, width: usize) -> Vec<Line<'static>> {
 
 fn main() -> io::Result<()> {
     let mut terminal = ratatui::init();
-    let addr = env::args().nth(1).expect("provide ip address");
-
-    let stream_read = TcpStream::connect(format!("{addr}:6969"))?;
-
-    let stream_write = stream_read.try_clone()?;
+    let (tx_input, event_rx) = mpsc::channel::<Event>();
 
     let mut app = App {
         exit: false,
         messages: vec![],
         user_message: "".to_string(),
-        status: Status::Connected,
-        stream: stream_write,
+        status: Status::Disconnected,
+        event_tx: tx_input.clone(),
+        stream: None,
         chat_state: ListState::default(),
     };
 
-    let (tx_input, event_rx) = mpsc::channel::<Event>();
-    let tx_reader = tx_input.clone();
+    let addr = env::args().nth(1);
+    if let Some(addr) = addr {
+        app.connect(&addr);
+    }
 
     thread::spawn(move || handle_input_events(tx_input));
-    thread::spawn(move || handle_chat_events(tx_reader, stream_read));
 
     let app_result = app.run(&mut terminal, event_rx);
     app_result
