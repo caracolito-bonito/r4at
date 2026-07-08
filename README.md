@@ -12,8 +12,8 @@
 
 
 ## Additional things:
-- add the ability to start client without ip-address
-- add commands to connect, disconnect and help ⏳
+- add the ability to start client without ip-address ✅
+- add commands to connect, disconnect and help ✅
 - add status bar (to show connected/disconnected for now) ✅
 - make service messages in chat colorful   
 

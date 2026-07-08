@@ -1,7 +1,7 @@
 use std::{
     env,
     io::{self, Read, Write},
-    net::TcpStream,
+    net::{Shutdown, TcpStream},
     sync::mpsc,
     thread, usize,
 };
@@ -161,11 +161,25 @@ impl App {
                     "connect" => {
                         if argument.is_empty() {
                             self.push_message(String::from("/connect <ip> - connects to a server"));
+                            self.user_message.clear();
                             return;
                         }
                         self.connect(argument);
                     }
-                    _ => todo!(),
+                    "disconnect" => {
+                        let stream = self.stream.take();
+                        match stream {
+                            Some(s) => {
+                                let _ = s.shutdown(Shutdown::Both);
+                            }
+                            None => {
+                                self.push_message("Your are already disconnected".into());
+                            }
+                        }
+                    }
+                    _ => {
+                        self.push_message("Command is not supported".into());
+                    }
                 }
             }
             None => {
