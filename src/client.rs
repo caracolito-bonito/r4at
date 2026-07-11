@@ -3,7 +3,7 @@ use std::{
     io::{self, Read, Write},
     net::{Shutdown, TcpStream},
     sync::mpsc,
-    thread, usize,
+    thread,
 };
 
 use crossterm::event::{
@@ -19,7 +19,6 @@ use ratatui::{
     widgets::{Block, List, ListState, Paragraph},
 };
 
-#[allow(unused)]
 enum Event {
     Terminal(CtEvent),
     Chat(String),
@@ -31,9 +30,30 @@ enum Status {
     Disconnected,
 }
 
+enum Message {
+    System(String),
+    Chat(String),
+}
+
+impl Message {
+    fn text(&self) -> &str {
+        match self {
+            Message::System(s) => s.as_str(),
+            Message::Chat(s) => s.as_str(),
+        }
+    }
+
+    fn color(&self) -> Color {
+        match self {
+            Message::System(_) => Color::Yellow,
+            Message::Chat(_) => Color::default(),
+        }
+    }
+}
+
 struct App {
     exit: bool,
-    messages: Vec<String>,
+    messages: Vec<Message>,
     user_message: String,
     status: Status,
     stream: Option<TcpStream>,
@@ -52,7 +72,7 @@ impl App {
             match rx.recv().unwrap() {
                 Event::Terminal(CtEvent::Key(k)) => self.handle_key_events(k)?,
                 Event::Chat(message) => {
-                    self.push_message(message);
+                    self.push_message(Message::Chat(message));
                 }
                 Event::Disconnect => self.status = Status::Disconnected,
                 Event::Terminal(_) => {}
@@ -107,9 +127,13 @@ impl App {
         let message_list: Vec<Text> = self
             .messages
             .iter()
-            .map(|m| wrap_text(m, chat_width as usize))
-            .map(|wm| Text::from(wm))
-            .collect();
+            .map(|m| {
+                wrap_text(m.text(), chat_width as usize)
+                    .into_iter()
+                    .map(|l| l.style(Style::new().fg(m.color())))
+                    .collect::<Text>()
+            })
+            .collect::<Vec<Text>>();
 
         let chat = List::new(message_list).block(chat_block);
 
@@ -144,7 +168,7 @@ impl App {
         Ok(())
     }
 
-    fn push_message(&mut self, message: String) {
+    fn push_message(&mut self, message: Message) {
         self.messages.push(message);
         self.chat_state.select(Some(self.messages.len() - 1));
     }
@@ -156,14 +180,26 @@ impl App {
                 let (command, argument) = rest.split_once(' ').unwrap_or((rest, ""));
                 match command {
                     "help" => {
-                        self.push_message("/help <command> — print help".into());
+                        self.push_message(Message::System(String::from(
+                            "/help <command> — print help",
+                        )));
                     }
                     "connect" => {
                         if argument.is_empty() {
-                            self.push_message(String::from("/connect <ip> - connects to a server"));
+                            self.push_message(Message::System(String::from(
+                                "/connect <ip> - connects to a server",
+                            )));
                             self.user_message.clear();
                             return;
                         }
+                        if self.stream.is_some() {
+                            self.push_message(Message::System(String::from(
+                                "You are already connected",
+                            )));
+                            self.user_message.clear();
+                            return;
+                        }
+
                         self.connect(argument);
                     }
                     "disconnect" => {
@@ -173,12 +209,16 @@ impl App {
                                 let _ = s.shutdown(Shutdown::Both);
                             }
                             None => {
-                                self.push_message("Your are already disconnected".into());
+                                self.push_message(Message::System(String::from(
+                                    "Your are already disconnected",
+                                )));
                             }
                         }
                     }
                     _ => {
-                        self.push_message("Command is not supported".into());
+                        self.push_message(Message::System(String::from(
+                            "Command is not supported",
+                        )));
                     }
                 }
             }
@@ -186,11 +226,11 @@ impl App {
                 let stream = self.stream.as_mut();
                 if let Some(stream) = stream {
                     let _ = stream.write_all(message.as_bytes());
-                    self.push_message(message);
+                    self.push_message(Message::Chat(message));
                 } else {
-                    self.push_message(String::from(
+                    self.push_message(Message::System(String::from(
                         "You are disconnected. Your message wasn't delivered. Try to reconnect",
-                    ));
+                    )));
                 }
             }
         }
@@ -198,11 +238,13 @@ impl App {
     }
     fn connect(&mut self, ip: &str) {
         let Ok(stream) = TcpStream::connect(format!("{ip}:6969")) else {
-            self.push_message(String::from("Couldn't reach IP"));
+            self.push_message(Message::System(String::from("Couldn't reach IP")));
             return;
         };
         let Ok(write_half) = stream.try_clone() else {
-            self.push_message(String::from("Couldn't create write half for a stream"));
+            self.push_message(Message::System(String::from(
+                "Couldn't create write half for a stream",
+            )));
             return;
         };
         self.stream = Some(write_half);
