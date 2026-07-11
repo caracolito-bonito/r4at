@@ -26,6 +26,10 @@ struct Command {
     to_run: fn(&mut App, &str),
 }
 
+fn find_command(name: &str) -> Option<&'static Command> {
+    COMMANDS.iter().find(|c| c.name == name)
+}
+
 const COMMANDS: &[Command] = &[
     Command {
         name: "help",
@@ -48,13 +52,55 @@ const COMMANDS: &[Command] = &[
 ];
 
 fn disconnect_command(app: &mut App, _arg: &str) {
-    todo!()
+    let stream = app.stream.take();
+    match stream {
+        Some(s) => {
+            let _ = s.shutdown(Shutdown::Both);
+        }
+        None => {
+            app.push_message(Message::System(String::from(
+                "Your are already disconnected",
+            )));
+        }
+    }
 }
 fn connect_command(app: &mut App, arg: &str) {
-    todo!()
+    if arg.is_empty() {
+        app.push_message(Message::System(String::from(
+            "/connect <ip> - connects to a server",
+        )));
+        return;
+    }
+    if app.stream.is_some() {
+        app.push_message(Message::System(String::from(
+            "You are already connected. Disconnect first.",
+        )));
+        return;
+    }
+
+    app.connect(arg);
 }
 fn help_command(app: &mut App, arg: &str) {
-    todo!()
+    let command_name = arg.trim();
+    if command_name.is_empty() {
+        for c in COMMANDS.iter() {
+            app.push_message(Message::System(format!(
+                "{} - {}",
+                c.signature, c.description
+            )));
+        }
+    } else {
+        if let Some(command) = find_command(command_name) {
+            app.push_message(Message::System(format!(
+                "{} - {}",
+                command.signature, command.description
+            )));
+        } else {
+            app.push_message(Message::System(format!(
+                "Unknown command `/{command_name}`"
+            )));
+        }
+    }
 }
 
 enum Event {
@@ -216,44 +262,9 @@ impl App {
         match message.strip_prefix("/") {
             Some(rest) => {
                 let (command, argument) = rest.split_once(' ').unwrap_or((rest, ""));
-                match command {
-                    "help" => {
-                        self.push_message(Message::System(String::from(
-                            "/help <command> — print help",
-                        )));
-                    }
-                    "connect" => {
-                        if argument.is_empty() {
-                            self.push_message(Message::System(String::from(
-                                "/connect <ip> - connects to a server",
-                            )));
-                            self.user_message.clear();
-                            return;
-                        }
-                        if self.stream.is_some() {
-                            self.push_message(Message::System(String::from(
-                                "You are already connected",
-                            )));
-                            self.user_message.clear();
-                            return;
-                        }
-
-                        self.connect(argument);
-                    }
-                    "disconnect" => {
-                        let stream = self.stream.take();
-                        match stream {
-                            Some(s) => {
-                                let _ = s.shutdown(Shutdown::Both);
-                            }
-                            None => {
-                                self.push_message(Message::System(String::from(
-                                    "Your are already disconnected",
-                                )));
-                            }
-                        }
-                    }
-                    _ => {
+                match find_command(command) {
+                    Some(command) => (command.to_run)(self, argument),
+                    None => {
                         self.push_message(Message::System(String::from(
                             "Command is not supported",
                         )));
