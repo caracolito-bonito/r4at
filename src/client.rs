@@ -19,6 +19,44 @@ use ratatui::{
     widgets::{Block, List, ListState, Paragraph},
 };
 
+struct Command {
+    name: &'static str,
+    description: &'static str,
+    signature: &'static str,
+    to_run: fn(&mut App, &str),
+}
+
+const COMMANDS: &[Command] = &[
+    Command {
+        name: "help",
+        description: "Prints help",
+        signature: "/help <command>",
+        to_run: help_command,
+    },
+    Command {
+        name: "connect",
+        description: "Connects to the server by <ip> with token auth",
+        signature: "/connect <ip>",
+        to_run: connect_command,
+    },
+    Command {
+        name: "disconnect",
+        description: "Disconnects from the server",
+        signature: "/disconnect",
+        to_run: disconnect_command,
+    },
+];
+
+fn disconnect_command(app: &mut App, _arg: &str) {
+    todo!()
+}
+fn connect_command(app: &mut App, arg: &str) {
+    todo!()
+}
+fn help_command(app: &mut App, arg: &str) {
+    todo!()
+}
+
 enum Event {
     Terminal(CtEvent),
     Chat(String),
