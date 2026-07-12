@@ -19,6 +19,24 @@ use ratatui::{
     widgets::{Block, List, ListState, Paragraph},
 };
 
+macro_rules! chat_info {
+    ($app:expr, $($arg:tt)*) => {
+        $app.push_message(Message::System(format!($($arg)*)))
+    };
+}
+
+macro_rules! chat_msg {
+    ($app:expr, $($arg:tt)*) => {
+        $app.push_message(Message::Chat(format!($($arg)*)))
+    };
+}
+
+macro_rules! chat_err {
+    ($app:expr, $($arg:tt)*) => {
+        $app.push_message(Message::Error(format!($($arg)*)))
+    };
+}
+
 struct Command {
     name: &'static str,
     description: &'static str,
@@ -58,23 +76,17 @@ fn disconnect_command(app: &mut App, _arg: &str) {
             let _ = s.shutdown(Shutdown::Both);
         }
         None => {
-            app.push_message(Message::System(String::from(
-                "Your are already disconnected",
-            )));
+            chat_info!(app, "You are already disconnected");
         }
     }
 }
 fn connect_command(app: &mut App, arg: &str) {
     if arg.is_empty() {
-        app.push_message(Message::System(String::from(
-            "/connect <ip> - connects to a server",
-        )));
+        chat_info!(app, "/connect <ip> - connects to a server");
         return;
     }
     if app.stream.is_some() {
-        app.push_message(Message::System(String::from(
-            "You are already connected. Disconnect first.",
-        )));
+        chat_info!(app, "You are already connected. Disconnect first.");
         return;
     }
 
@@ -84,21 +96,13 @@ fn help_command(app: &mut App, arg: &str) {
     let command_name = arg.trim();
     if command_name.is_empty() {
         for c in COMMANDS.iter() {
-            app.push_message(Message::System(format!(
-                "{} - {}",
-                c.signature, c.description
-            )));
+            chat_info!(app, "{} - {}", c.signature, c.description);
         }
     } else {
-        if let Some(command) = find_command(command_name) {
-            app.push_message(Message::System(format!(
-                "{} - {}",
-                command.signature, command.description
-            )));
+        if let Some(c) = find_command(command_name) {
+            chat_info!(app, "{} - {}", c.signature, c.description);
         } else {
-            app.push_message(Message::System(format!(
-                "Unknown command `/{command_name}`"
-            )));
+            chat_err!(app, "Unknown command `/{command_name}`");
         }
     }
 }
@@ -117,6 +121,7 @@ enum Status {
 enum Message {
     System(String),
     Chat(String),
+    Error(String),
 }
 
 impl Message {
@@ -124,13 +129,15 @@ impl Message {
         match self {
             Message::System(s) => s.as_str(),
             Message::Chat(s) => s.as_str(),
+            Message::Error(s) => s.as_str(),
         }
     }
 
     fn color(&self) -> Color {
         match self {
             Message::System(_) => Color::Yellow,
-            Message::Chat(_) => Color::default(),
+            Message::Chat(_) => Color::White,
+            Message::Error(_) => Color::LightRed,
         }
     }
 }
@@ -156,7 +163,7 @@ impl App {
             match rx.recv().unwrap() {
                 Event::Terminal(CtEvent::Key(k)) => self.handle_key_events(k)?,
                 Event::Chat(message) => {
-                    self.push_message(Message::Chat(message));
+                    chat_msg!(self, "{message}");
                 }
                 Event::Disconnect => self.status = Status::Disconnected,
                 Event::Terminal(_) => {}
@@ -265,9 +272,7 @@ impl App {
                 match find_command(command) {
                     Some(command) => (command.to_run)(self, argument),
                     None => {
-                        self.push_message(Message::System(String::from(
-                            "Command is not supported",
-                        )));
+                        chat_err!(self, "Command is not supported");
                     }
                 }
             }
@@ -275,11 +280,12 @@ impl App {
                 let stream = self.stream.as_mut();
                 if let Some(stream) = stream {
                     let _ = stream.write_all(message.as_bytes());
-                    self.push_message(Message::Chat(message));
+                    chat_msg!(self, "{message}");
                 } else {
-                    self.push_message(Message::System(String::from(
-                        "You are disconnected. Your message wasn't delivered. Try to reconnect",
-                    )));
+                    chat_info!(
+                        self,
+                        "You are disconnected. Your message wasn't delivered. Try to reconnect"
+                    );
                 }
             }
         }
@@ -287,13 +293,11 @@ impl App {
     }
     fn connect(&mut self, ip: &str) {
         let Ok(stream) = TcpStream::connect(format!("{ip}:6969")) else {
-            self.push_message(Message::System(String::from("Couldn't reach IP")));
+            chat_err!(self, "Couldn't reach IP");
             return;
         };
         let Ok(write_half) = stream.try_clone() else {
-            self.push_message(Message::System(String::from(
-                "Couldn't create write half for a stream",
-            )));
+            chat_err!(self, "Couldn't connect to the server");
             return;
         };
         self.stream = Some(write_half);
