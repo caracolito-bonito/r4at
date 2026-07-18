@@ -1,6 +1,6 @@
 use std::{
     env,
-    io::{self, Read, Write},
+    io::{self},
     net::{Shutdown, TcpStream},
     sync::mpsc,
     thread,
@@ -11,6 +11,7 @@ use crossterm::event::{
     Event::{self as CtEvent},
     KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
 };
+use protocol::{decode, encode};
 use ratatui::{
     layout::{Constraint, Layout},
     style::{Color, Style},
@@ -279,7 +280,8 @@ impl App {
             None => {
                 let stream = self.stream.as_mut();
                 if let Some(stream) = stream {
-                    let _ = stream.write_all(message.as_bytes());
+                    // let _ = stream.write_all(message.as_bytes());
+                    let _ = encode(message.as_bytes(), stream);
                     chat_msg!(self, "{message}");
                 } else {
                     chat_info!(
@@ -341,18 +343,10 @@ fn main() -> io::Result<()> {
 }
 
 fn handle_chat_events(tx_reader: mpsc::Sender<Event>, mut stream: TcpStream) {
-    let mut buffer = [0; 64];
-
     loop {
-        match stream.read(&mut buffer) {
-            Ok(0) => {
-                tx_reader.send(Event::Disconnect).unwrap();
-                break;
-            }
+        match decode(&mut stream) {
             Ok(n) => tx_reader
-                .send(Event::Chat(
-                    String::from_utf8_lossy(&buffer[0..n]).into_owned(),
-                ))
+                .send(Event::Chat(String::from_utf8_lossy(&n).into_owned()))
                 .unwrap(),
             Err(_) => {
                 tx_reader.send(Event::Disconnect).unwrap();
