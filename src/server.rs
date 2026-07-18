@@ -9,7 +9,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread;
 use std::time::{Duration, SystemTime};
-
 type Result<T> = std::result::Result<T, ()>;
 
 static SENSITIVE_MODE: AtomicBool = AtomicBool::new(false);

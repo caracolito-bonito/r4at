@@ -977,6 +977,7 @@ dependencies = [
  "crossterm",
  "getrandom 0.4.2",
  "ratatui",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

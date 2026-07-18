@@ -308,13 +308,12 @@ impl App {
 }
 
 fn wrap_text(message: &str, width: usize) -> Vec<Line<'static>> {
-    let wrapped = message
+    message
         .chars()
         .collect::<Vec<char>>()
         .chunks(width)
         .map(|chunk| Line::from(chunk.iter().collect::<String>()))
-        .collect();
-    wrapped
+        .collect()
 }
 
 fn main() -> io::Result<()> {
@@ -338,8 +337,7 @@ fn main() -> io::Result<()> {
 
     thread::spawn(move || handle_input_events(tx_input));
 
-    let app_result = app.run(&mut terminal, event_rx);
-    app_result
+    app.run(&mut terminal, event_rx)
 }
 
 fn handle_chat_events(tx_reader: mpsc::Sender<Event>, mut stream: TcpStream) {
