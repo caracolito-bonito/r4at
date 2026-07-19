@@ -45,8 +45,7 @@ pub fn encode(frame: &Frame, stream: &mut impl Write) -> Result<(), ProtocolErro
 }
 
 pub fn decode(stream: &mut impl Read) -> Result<Frame, ProtocolError> {
-    let mut type_buf = [0u8; 1];
-    let mut header_buf = [0u8; 2];
+    let mut header_buf = [0u8; 3];
 
     match stream.read_exact(&mut header_buf) {
         Ok(_) => {}
@@ -57,11 +56,27 @@ pub fn decode(stream: &mut impl Read) -> Result<Frame, ProtocolError> {
             return Err(ProtocolError::IO(e));
         }
     };
-    let len = u16::from_be_bytes(header_buf);
+
+    let frame_type = FrameType::try_from(header_buf[0])?;
+    let len = u16::from_be_bytes(header_buf[1..].try_into().unwrap());
 
     let mut payload = vec![0u8; len as usize];
+
     match stream.read_exact(&mut payload) {
-        Ok(_) => Ok(payload),
+        Ok(_) => {
+            let id_payload_part = payload
+                .first_chunk::<4>()
+                .ok_or(ProtocolError::PayloadIsMalformed)?;
+            let id = u32::from_be_bytes(*id_payload_part);
+            match frame_type {
+                FrameType::Chat => {
+                    let (_, text_payload_part) = payload.split_first_chunk::<4>().unwrap();
+                    let text = Vec::from(text_payload_part);
+                    Ok(Frame::Chat { id, text })
+                }
+                FrameType::Dropped => Ok(Frame::Dropped { id }),
+            }
+        }
         Err(e) => {
             if e.kind() == io::ErrorKind::UnexpectedEof {
                 return Err(ProtocolError::Disconnect);
@@ -81,4 +96,6 @@ pub enum ProtocolError {
     Disconnect,
     #[error("Unknown frame type {0}")]
     UnknownFrameType(u8),
+    #[error("Payload is malformed or too short")]
+    PayloadIsMalformed,
 }
