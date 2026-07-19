@@ -25,20 +25,29 @@ impl TryFrom<u8> for FrameType {
 }
 const MAX_PAYLOAD_SIZE: u16 = u16::MAX;
 
-pub fn encode(payload: &[u8], stream: &mut impl Write) -> Result<(), ProtocolError> {
+pub fn encode(frame: &Frame, stream: &mut impl Write) -> Result<(), ProtocolError> {
+    let (type_byte, payload) = match frame {
+        Frame::Chat { id, text } => (
+            FrameType::Chat as u8,
+            [&id.to_be_bytes()[..], text].concat(),
+        ),
+        Frame::Dropped { id } => (FrameType::Dropped as u8, id.to_be_bytes().to_vec()),
+    };
     let payload_len = payload.len();
     if payload_len > MAX_PAYLOAD_SIZE as usize {
         return Err(ProtocolError::PayloadIsTooLong(payload_len));
     }
     let len = payload_len as u16;
-
+    stream.write_all(&[type_byte])?;
     stream.write_all(&len.to_be_bytes())?;
-    stream.write_all(payload)?;
+    stream.write_all(&payload)?;
     Ok(())
 }
 
-pub fn decode(stream: &mut impl Read) -> Result<Vec<u8>, ProtocolError> {
+pub fn decode(stream: &mut impl Read) -> Result<Frame, ProtocolError> {
+    let mut type_buf = [0u8; 1];
     let mut header_buf = [0u8; 2];
+
     match stream.read_exact(&mut header_buf) {
         Ok(_) => {}
         Err(e) => {
