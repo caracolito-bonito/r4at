@@ -322,6 +322,9 @@ fn client(stream: Arc<TcpStream>, messages: Sender<Message>) -> Result<()> {
                     let _ = messages.send(Message::ClientDisconnected { author_addr });
                     return Ok(());
                 }
+                protocol::ProtocolError::UnknownFrameType(b) => {
+                    todo!()
+                }
             },
         }
     }

@@ -1,14 +1,19 @@
-# Here is the high level plan
+# r4at
+Simple multi user chat application
 
-1. Follow [tsoding tutorial](https://www.youtube.com/watch?v=BbIEuNscn_E) and implement simple multi-user chat using only standard library ⏳
+## Here is the high level plan
+
+1. Follow [tsoding tutorial](https://www.youtube.com/watch?v=BbIEuNscn_E) and implement simple multi-user chat using only standard library ✅
   - server, client, auth, rate limiting ✅
   - tls and security - 📌
 2. Add separate client with UI using crossterm ✅
 3. Add TUI using ratatui (but first just with crossterm) ✅  
-4. Break it trying to optimize something 📌
-5. Add some protocol to handle 2 problems: "if message is rate limited the client doesn't know that", "message framing" 📌
-6. Rewrite transport with async (tokio?)
-7. ... "no tengo ni una puta idea" what i will do next
+5. Protoocol enhancements:
+- introduce framing: add header to read exact size of payload instead of constant number of bytes ✅
+- add types (user message, server announcement) ⏳
+- add something to handle this case: "if message is rate limited the client doesn't know that" ⏳
+6. Rewrite transport with async (tokio?) 📌
+7. ... "no tengo ni una idea" what i will do after
 
 
 ## Additional things:

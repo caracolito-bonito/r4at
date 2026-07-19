@@ -1,6 +1,28 @@
 use std::io::{self, Read, Write};
 use thiserror::Error;
 
+pub enum Frame {
+    Chat { id: u32, text: Vec<u8> },
+    Dropped { id: u32 },
+}
+
+#[repr(u8)]
+enum FrameType {
+    Chat = 0,
+    Dropped = 1,
+}
+
+impl TryFrom<u8> for FrameType {
+    type Error = ProtocolError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(FrameType::Chat),
+            1 => Ok(FrameType::Dropped),
+            _ => Err(ProtocolError::UnknownFrameType(value)),
+        }
+    }
+}
 const MAX_PAYLOAD_SIZE: u16 = u16::MAX;
 
 pub fn encode(payload: &[u8], stream: &mut impl Write) -> Result<(), ProtocolError> {
@@ -48,4 +70,6 @@ pub enum ProtocolError {
     IO(#[from] io::Error),
     #[error("disconnect")]
     Disconnect,
+    #[error("Unknown frame type {0}")]
+    UnknownFrameType(u8),
 }
