@@ -4,12 +4,14 @@ use thiserror::Error;
 pub enum Frame {
     Chat { id: u32, text: Vec<u8> },
     Dropped { id: u32 },
+    System { text: Vec<u8> },
 }
 
 #[repr(u8)]
 enum FrameType {
     Chat = 0,
     Dropped = 1,
+    System = 2,
 }
 
 impl TryFrom<u8> for FrameType {
@@ -19,6 +21,7 @@ impl TryFrom<u8> for FrameType {
         match value {
             0 => Ok(FrameType::Chat),
             1 => Ok(FrameType::Dropped),
+            2 => Ok(FrameType::System),
             _ => Err(ProtocolError::UnknownFrameType(value)),
         }
     }
@@ -31,6 +34,7 @@ pub fn encode(frame: &Frame, stream: &mut impl Write) -> Result<(), ProtocolErro
             FrameType::Chat as u8,
             [&id.to_be_bytes()[..], text].concat(),
         ),
+        Frame::System { text } => (FrameType::System as u8, text.to_vec()),
         Frame::Dropped { id } => (FrameType::Dropped as u8, id.to_be_bytes().to_vec()),
     };
     let payload_len = payload.len();
@@ -63,20 +67,19 @@ pub fn decode(stream: &mut impl Read) -> Result<Frame, ProtocolError> {
     let mut payload = vec![0u8; len as usize];
 
     match stream.read_exact(&mut payload) {
-        Ok(_) => {
-            let id_payload_part = payload
-                .first_chunk::<4>()
-                .ok_or(ProtocolError::PayloadIsMalformed)?;
-            let id = u32::from_be_bytes(*id_payload_part);
-            match frame_type {
-                FrameType::Chat => {
-                    let (_, text_payload_part) = payload.split_first_chunk::<4>().unwrap();
-                    let text = Vec::from(text_payload_part);
-                    Ok(Frame::Chat { id, text })
-                }
-                FrameType::Dropped => Ok(Frame::Dropped { id }),
+        Ok(_) => match frame_type {
+            FrameType::Chat => {
+                let id = extract_id(&payload)?;
+                let (_, text_payload_part) = payload.split_first_chunk::<4>().unwrap();
+                let text = Vec::from(text_payload_part);
+                Ok(Frame::Chat { id, text })
             }
-        }
+            FrameType::Dropped => {
+                let id = extract_id(&payload)?;
+                Ok(Frame::Dropped { id })
+            }
+            FrameType::System => Ok(Frame::System { text: payload }),
+        },
         Err(e) => {
             if e.kind() == io::ErrorKind::UnexpectedEof {
                 return Err(ProtocolError::Disconnect);
@@ -84,6 +87,13 @@ pub fn decode(stream: &mut impl Read) -> Result<Frame, ProtocolError> {
             Err(ProtocolError::IO(e))
         }
     }
+}
+
+fn extract_id(payload: &[u8]) -> Result<u32, ProtocolError> {
+    let id_payload_part = payload
+        .first_chunk::<4>()
+        .ok_or(ProtocolError::PayloadIsMalformed)?;
+    Ok(u32::from_be_bytes(*id_payload_part))
 }
 
 #[derive(Error, Debug)]
