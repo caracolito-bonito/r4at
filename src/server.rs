@@ -9,6 +9,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread;
 use std::time::{Duration, SystemTime};
 
+use protocol::Frame;
 use protocol::decode;
 use protocol::encode;
 type Result<T> = std::result::Result<T, ()>;
@@ -17,6 +18,7 @@ static SENSITIVE_MODE: AtomicBool = AtomicBool::new(false);
 const BAN_LIMIT: Duration = Duration::from_secs(10 * 60);
 const MESSAGE_RATE: Duration = Duration::from_secs(1);
 const STRIKE_LIMIT: u64 = 10;
+const IGNORE_ID: u32 = 0;
 
 #[allow(dead_code)]
 fn set_sensitive_mode(enabled: bool) {
@@ -46,6 +48,7 @@ enum Message {
     Received {
         author_addr: SocketAddr,
         bytes: Vec<u8>,
+        id: u32,
     },
 }
 
@@ -100,7 +103,9 @@ impl Server {
             );
 
             let _ = encode(
-                format!("You are banned! {secs}s left").as_bytes(),
+                &protocol::Frame::System {
+                    text: format!("You are banned! {secs}s left").into_bytes(),
+                },
                 &mut author,
             )
             .map_err(|err| {
@@ -121,13 +126,13 @@ impl Server {
                     authenticated: false,
                 },
             );
-            // let _ = decode(&mut author.as_ref()).map_err(|err| {
-            //     eprintln!(
-            //         "ERROR: Could not send token prompt to {}: {}",
-            //         author_addr, err
-            //     )
-            // });
-            let _ = encode("Token: ".as_bytes(), &mut author.as_ref()).map_err(|err| {
+            let _ = encode(
+                &Frame::System {
+                    text: "Token: ".into(),
+                },
+                &mut author.as_ref(),
+            )
+            .map_err(|err| {
                 eprintln!(
                     "ERROR: Could not send token prompt to {}: {}",
                     author_addr, err
@@ -141,7 +146,7 @@ impl Server {
         println!("INFO: Client {author_addr} disconnected");
     }
 
-    fn new_message(&mut self, author_addr: SocketAddr, bytes: &[u8]) {
+    fn new_message(&mut self, author_addr: SocketAddr, bytes: &[u8], id: u32) {
         if let Some(author) = self.clients.get_mut(&author_addr) {
             let now = SystemTime::now();
 
@@ -157,15 +162,23 @@ impl Server {
                         println!("Client {author_addr} sent message {bytes:?}");
                         for (addr, client) in self.clients.iter() {
                             if *addr != author_addr && client.authenticated {
-                                // let _ = client.conn.as_ref().write(bytes);
-                                let _ = encode(bytes, &mut client.conn.as_ref());
+                                let _ = encode(
+                                    &Frame::Chat {
+                                        id: IGNORE_ID,
+                                        text: bytes.to_vec(),
+                                    },
+                                    &mut client.conn.as_ref(),
+                                );
                             }
                         }
                     } else {
                         if text == self.token {
                             author.authenticated = true;
                             let _ = encode(
-                                "Welcome to the club, buddy! Now you can send messages.".as_bytes(),
+                                &Frame::System {
+                                    text: "Welcome to the club, buddy! Now you can send messages."
+                                        .into(),
+                                },
                                 &mut author.conn.as_ref(),
                             )
                             .map_err(|err| {
@@ -176,24 +189,32 @@ impl Server {
                             });
                         } else {
                             println!("INFO: User {} failed authentication", author_addr);
-                            let _ = encode("Invalid token!".as_bytes(), &mut author.conn.as_ref())
-                                .map_err(|err| {
-                                    eprintln!(
-                                        "Could not send auth failed prompt to {}: {}",
-                                        author_addr, err
-                                    )
-                                });
+                            let _ = encode(
+                                &Frame::System {
+                                    text: "Invalid token!".into(),
+                                },
+                                &mut author.conn.as_ref(),
+                            )
+                            .map_err(|err| {
+                                eprintln!(
+                                    "Could not send auth failed prompt to {}: {}",
+                                    author_addr, err
+                                )
+                            });
                             let _ = author.conn.shutdown(std::net::Shutdown::Both);
                             self.clients.remove(&author_addr);
                         }
                     }
                 } else {
+                    let _ = encode(&Frame::Dropped { id }, &mut author.conn.as_ref());
                     author.strike_count += 1;
                     if author.strike_count >= STRIKE_LIMIT {
                         self.banned_clients.insert(author_addr.ip(), now);
                         let secs = (BAN_LIMIT - diff).as_secs_f32();
                         let _ = encode(
-                            format!("You are banned! {secs}s left").as_bytes(),
+                            &Frame::System {
+                                text: format!("You are banned! {secs}s left").into_bytes(),
+                            },
                             &mut author.conn.as_ref(),
                         );
                         let _ = author.conn.shutdown(std::net::Shutdown::Both);
@@ -201,12 +222,15 @@ impl Server {
                     }
                 }
             } else {
+                let _ = encode(&Frame::Dropped { id }, &mut author.conn.as_ref());
                 author.strike_count += 1;
                 if author.strike_count >= STRIKE_LIMIT {
                     self.banned_clients.insert(author_addr.ip(), now);
                     let secs = (BAN_LIMIT - diff).as_secs_f32();
                     let _ = encode(
-                        format!("You are banned! {secs}s left").as_bytes(),
+                        &Frame::System {
+                            text: format!("You are banned! {secs}s left").into_bytes(),
+                        },
                         &mut author.conn.as_ref(),
                     );
                     let _ = author.conn.shutdown(std::net::Shutdown::Both);
@@ -276,8 +300,12 @@ fn server(messages: Receiver<Message>, token: String) -> Result<()> {
             Message::ClientDisconnected { author_addr } => {
                 server.client_disconnected(author_addr);
             }
-            Message::Received { author_addr, bytes } => {
-                server.new_message(author_addr, &bytes);
+            Message::Received {
+                author_addr,
+                bytes,
+                id,
+            } => {
+                server.new_message(author_addr, &bytes, id);
             }
         }
     }
@@ -295,18 +323,29 @@ fn client(stream: Arc<TcpStream>, messages: Sender<Message>) -> Result<()> {
         })
         .map_err(|err| eprintln!("ERROR: Could not send message to the server thread: {err}"))?;
 
-    // let mut buffer = [0u8; 64];
-
     loop {
         let decoded_stream = decode(&mut stream.as_ref());
         match decoded_stream {
-            Ok(bytes) => {
-                messages
-                    .send(Message::Received { author_addr, bytes })
-                    .map_err(|err| {
-                        eprintln!("ERROR: Failed to send a message to the server thread: {err}");
-                    })?;
-            }
+            Ok(frame) => match frame {
+                protocol::Frame::Chat { id, text } => {
+                    messages
+                        .send(Message::Received {
+                            author_addr,
+                            bytes: text,
+                            id,
+                        })
+                        .map_err(|err| {
+                            eprintln!(
+                                "ERROR: Failed to send a message to the server thread: {err}"
+                            );
+                        })?;
+                }
+                _ => {
+                    eprintln!("Client Cannot send Frame except Chat frame");
+                    let _ = messages.send(Message::ClientDisconnected { author_addr });
+                    return Ok(());
+                }
+            },
             Err(e) => match e {
                 protocol::ProtocolError::PayloadIsTooLong(len) => {
                     eprintln!("ERROR: The message is too big: {len}");
@@ -323,7 +362,14 @@ fn client(stream: Arc<TcpStream>, messages: Sender<Message>) -> Result<()> {
                     return Ok(());
                 }
                 protocol::ProtocolError::UnknownFrameType(b) => {
-                    todo!()
+                    eprintln!("ERROR: Client sent unknown frame type: {b}");
+                    let _ = messages.send(Message::ClientDisconnected { author_addr });
+                    return Ok(());
+                }
+                protocol::ProtocolError::PayloadIsMalformed => {
+                    eprintln!("ERROR: Payload recieved from a client is malformed");
+                    let _ = messages.send(Message::ClientDisconnected { author_addr });
+                    return Ok(());
                 }
             },
         }
