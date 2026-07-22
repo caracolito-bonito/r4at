@@ -4,12 +4,14 @@ use thiserror::Error;
 pub enum Frame {
     Chat { id: u32, text: Vec<u8> },
     Dropped { id: u32 },
+    System { text: Vec<u8> },
 }
 
 #[repr(u8)]
 enum FrameType {
     Chat = 0,
     Dropped = 1,
+    System = 2,
 }
 
 impl TryFrom<u8> for FrameType {
@@ -19,26 +21,36 @@ impl TryFrom<u8> for FrameType {
         match value {
             0 => Ok(FrameType::Chat),
             1 => Ok(FrameType::Dropped),
+            2 => Ok(FrameType::System),
             _ => Err(ProtocolError::UnknownFrameType(value)),
         }
     }
 }
 const MAX_PAYLOAD_SIZE: u16 = u16::MAX;
 
-pub fn encode(payload: &[u8], stream: &mut impl Write) -> Result<(), ProtocolError> {
+pub fn encode(frame: &Frame, stream: &mut impl Write) -> Result<(), ProtocolError> {
+    let (type_byte, payload) = match frame {
+        Frame::Chat { id, text } => (
+            FrameType::Chat as u8,
+            [&id.to_be_bytes()[..], text].concat(),
+        ),
+        Frame::System { text } => (FrameType::System as u8, text.to_vec()),
+        Frame::Dropped { id } => (FrameType::Dropped as u8, id.to_be_bytes().to_vec()),
+    };
     let payload_len = payload.len();
     if payload_len > MAX_PAYLOAD_SIZE as usize {
         return Err(ProtocolError::PayloadIsTooLong(payload_len));
     }
     let len = payload_len as u16;
-
+    stream.write_all(&[type_byte])?;
     stream.write_all(&len.to_be_bytes())?;
-    stream.write_all(payload)?;
+    stream.write_all(&payload)?;
     Ok(())
 }
 
-pub fn decode(stream: &mut impl Read) -> Result<Vec<u8>, ProtocolError> {
-    let mut header_buf = [0u8; 2];
+pub fn decode(stream: &mut impl Read) -> Result<Frame, ProtocolError> {
+    let mut header_buf = [0u8; 3];
+
     match stream.read_exact(&mut header_buf) {
         Ok(_) => {}
         Err(e) => {
@@ -48,11 +60,26 @@ pub fn decode(stream: &mut impl Read) -> Result<Vec<u8>, ProtocolError> {
             return Err(ProtocolError::IO(e));
         }
     };
-    let len = u16::from_be_bytes(header_buf);
+
+    let frame_type = FrameType::try_from(header_buf[0])?;
+    let len = u16::from_be_bytes(header_buf[1..].try_into().unwrap());
 
     let mut payload = vec![0u8; len as usize];
+
     match stream.read_exact(&mut payload) {
-        Ok(_) => Ok(payload),
+        Ok(_) => match frame_type {
+            FrameType::Chat => {
+                let id = extract_id(&payload)?;
+                let (_, text_payload_part) = payload.split_first_chunk::<4>().unwrap();
+                let text = Vec::from(text_payload_part);
+                Ok(Frame::Chat { id, text })
+            }
+            FrameType::Dropped => {
+                let id = extract_id(&payload)?;
+                Ok(Frame::Dropped { id })
+            }
+            FrameType::System => Ok(Frame::System { text: payload }),
+        },
         Err(e) => {
             if e.kind() == io::ErrorKind::UnexpectedEof {
                 return Err(ProtocolError::Disconnect);
@@ -60,6 +87,13 @@ pub fn decode(stream: &mut impl Read) -> Result<Vec<u8>, ProtocolError> {
             Err(ProtocolError::IO(e))
         }
     }
+}
+
+fn extract_id(payload: &[u8]) -> Result<u32, ProtocolError> {
+    let id_payload_part = payload
+        .first_chunk::<4>()
+        .ok_or(ProtocolError::PayloadIsMalformed)?;
+    Ok(u32::from_be_bytes(*id_payload_part))
 }
 
 #[derive(Error, Debug)]
@@ -72,4 +106,6 @@ pub enum ProtocolError {
     Disconnect,
     #[error("Unknown frame type {0}")]
     UnknownFrameType(u8),
+    #[error("Payload is malformed or too short")]
+    PayloadIsMalformed,
 }

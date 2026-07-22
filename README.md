@@ -10,8 +10,8 @@ Simple multi user chat application
 3. Add TUI using ratatui (but first just with crossterm) ✅  
 5. Protoocol enhancements:
 - introduce framing: add header to read exact size of payload instead of constant number of bytes ✅
-- add types (user message, server announcement) ⏳
-- add something to handle this case: "if message is rate limited the client doesn't know that" ⏳
+- add types (user message, server announcement) ✅
+- add something to handle this case: "if message is rate limited the client doesn't know that" ✅
 6. Rewrite transport with async (tokio?) 📌
 7. ... "no tengo ni una idea" what i will do after
 
@@ -25,6 +25,7 @@ Simple multi user chat application
 
 ## To fix
   - unwraps in senders
+  - i have 2 fields that both mean "client connected": status and stream. I should get rid of status.
   - need to make widget for messages scrollable to show only last N messages if count is more than height of the area! ✅
 
 
