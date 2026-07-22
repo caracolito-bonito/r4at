@@ -28,7 +28,7 @@ macro_rules! chat_info {
 
 macro_rules! chat_msg {
     ($app:expr, $($arg:tt)*) => {
-        $app.push_message(Message::Chat(format!($($arg)*)))
+        $app.push_message(Message::Incoming(format!($($arg)*)))
     };
 }
 
@@ -111,7 +111,9 @@ fn help_command(app: &mut App, arg: &str) {
 enum Event {
     Terminal(CtEvent),
     Chat(String),
+    System(String),
     Disconnect,
+    Dropped(u32),
 }
 
 enum Status {
@@ -121,7 +123,12 @@ enum Status {
 
 enum Message {
     System(String),
-    Chat(String),
+    Incoming(String),
+    Sent {
+        text: String,
+        id: u32,
+        dropped: bool,
+    },
     Error(String),
 }
 
@@ -129,16 +136,27 @@ impl Message {
     fn text(&self) -> &str {
         match self {
             Message::System(s) => s.as_str(),
-            Message::Chat(s) => s.as_str(),
+            Message::Incoming(s) => s.as_str(),
             Message::Error(s) => s.as_str(),
+            Message::Sent { text, .. } => text.as_str(),
         }
     }
 
     fn color(&self) -> Color {
         match self {
             Message::System(_) => Color::Yellow,
-            Message::Chat(_) => Color::White,
+            Message::Incoming(_) => Color::White,
             Message::Error(_) => Color::LightRed,
+            Message::Sent {
+                text: _,
+                id: _,
+                dropped,
+            } => {
+                if *dropped {
+                    return Color::Red;
+                }
+                Color::White
+            }
         }
     }
 }
@@ -151,6 +169,7 @@ struct App {
     stream: Option<TcpStream>,
     event_tx: mpsc::Sender<Event>,
     chat_state: ListState,
+    next_message_id: u32,
 }
 impl App {
     fn run(
@@ -166,7 +185,14 @@ impl App {
                 Event::Chat(message) => {
                     chat_msg!(self, "{message}");
                 }
-                Event::Disconnect => self.status = Status::Disconnected,
+                Event::System(message) => {
+                    chat_info!(self, "{message}")
+                }
+                Event::Dropped(id) => self.mark_dropped(id),
+                Event::Disconnect => {
+                    self.stream.take();
+                    self.status = Status::Disconnected
+                }
                 Event::Terminal(_) => {}
             }
         }
@@ -280,9 +306,19 @@ impl App {
             None => {
                 let stream = self.stream.as_mut();
                 if let Some(stream) = stream {
-                    // let _ = stream.write_all(message.as_bytes());
-                    let _ = encode(message.as_bytes(), stream);
-                    chat_msg!(self, "{message}");
+                    let _ = encode(
+                        &protocol::Frame::Chat {
+                            id: self.next_message_id,
+                            text: message.clone().into_bytes(),
+                        },
+                        stream,
+                    );
+                    self.push_message(Message::Sent {
+                        text: message,
+                        id: self.next_message_id,
+                        dropped: false,
+                    });
+                    self.next_message_id += 1;
                 } else {
                     chat_info!(
                         self,
@@ -307,6 +343,19 @@ impl App {
         thread::spawn(move || handle_chat_events(event_tx, stream));
         self.status = Status::Connected;
     }
+
+    fn mark_dropped(&mut self, id: u32) {
+        for m in self.messages.iter_mut() {
+            if let Message::Sent {
+                id: m_id, dropped, ..
+            } = m
+                && *m_id == id
+            {
+                *dropped = true;
+                break;
+            }
+        }
+    }
 }
 
 fn wrap_text(message: &str, width: usize) -> Vec<Line<'static>> {
@@ -330,6 +379,7 @@ fn main() -> io::Result<()> {
         event_tx: tx_input.clone(),
         stream: None,
         chat_state: ListState::default(),
+        next_message_id: 0,
     };
 
     let addr = env::args().nth(1);
@@ -345,9 +395,15 @@ fn main() -> io::Result<()> {
 fn handle_chat_events(tx_reader: mpsc::Sender<Event>, mut stream: TcpStream) {
     loop {
         match decode(&mut stream) {
-            Ok(n) => tx_reader
-                .send(Event::Chat(String::from_utf8_lossy(&n).into_owned()))
-                .unwrap(),
+            Ok(f) => match f {
+                protocol::Frame::Chat { text, .. } => tx_reader
+                    .send(Event::Chat(String::from_utf8_lossy(&text).into_owned()))
+                    .unwrap(),
+                protocol::Frame::System { text, .. } => tx_reader
+                    .send(Event::System(String::from_utf8_lossy(&text).into_owned()))
+                    .unwrap(),
+                protocol::Frame::Dropped { id } => tx_reader.send(Event::Dropped(id)).unwrap(),
+            },
             Err(_) => {
                 tx_reader.send(Event::Disconnect).unwrap();
                 break;
